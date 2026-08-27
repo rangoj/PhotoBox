@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  PhotoBox
 //
-//  Created by rango on 2025/10/17.
+//  Created by rango on 2026/8/27.
 //
 
 import SwiftUI
