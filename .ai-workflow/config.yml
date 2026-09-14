@@ -1,0 +1,67 @@
+---
+version: 1
+project:
+  name: PhotoBox
+routes:
+  quick:
+    allowed_paths:
+    - AGENTS.md
+    - WORKFLOW.md
+    allowed_prefixes:
+    - Docs/
+    - docs/
+    - ".ai-workflow/templates/"
+  spec:
+    path_patterns:
+    - "(^|/)(?:\\.github|\\.gitlab|infra|infrastructure|migrations?|generated)(/|$)"
+    - "(^|/)(?:Package\\.swift|Podfile(?:\\.lock)?|project\\.pbxproj|package-lock\\.json|yarn\\.lock|pnpm-lock\\.yaml|Gemfile\\.lock)$"
+    keyword_patterns:
+    - "(?i)(?:auth|login|payment|persist|migration|security|crypto|bluetooth|ble|firmware|ota)"
+    - "(?i)(?:photolibrary|photosauthorization|phphotolibrary|permission|privacy)"
+  reviewers:
+    standard:
+    - reviewer
+    spec:
+    - reviewer
+    - test_reviewer
+doctor:
+  required_commands:
+  - git
+  - ruby
+  - xcodebuild
+  optional_commands: []
+  required_paths:
+  - PhotoBox.xcodeproj/project.pbxproj
+  - PhotoBox/PhotoBoxApp.swift
+  - AGENTS.md
+validation:
+  standard_commands:
+  - xcodebuild -project PhotoBox.xcodeproj -scheme PhotoBox -configuration Debug -destination
+    'generic/platform=iOS Simulator' -derivedDataPath /tmp/PhotoBoxAIWorkflowDerivedData
+    CODE_SIGNING_ALLOWED=NO build
+  - xcodebuild -quiet -project PhotoBox.xcodeproj -scheme PhotoBox -configuration
+    Debug -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.3.1' -derivedDataPath
+    /tmp/PhotoBoxAIWorkflowTests CODE_SIGNING_ALLOWED=NO test -only-testing:PhotoBoxTests
+  spec_commands:
+  - xcodebuild -project PhotoBox.xcodeproj -scheme PhotoBox -configuration Release
+    -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/PhotoBoxAIWorkflowDerivedData
+    CODE_SIGNING_ALLOWED=NO build
+  - xcodebuild -quiet -project PhotoBox.xcodeproj -scheme PhotoBox -configuration
+    Debug -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.3.1' -derivedDataPath
+    /tmp/PhotoBoxAIWorkflowUITests CODE_SIGNING_ALLOWED=NO test -only-testing:PhotoBoxUITests
+integrations:
+  openspec:
+    required: true
+    config_path: openspec/config.yaml
+    skill_root: ".agents/skills"
+    target_marker: ".agents/skills/.openspec-target"
+    required_skills:
+    - openspec-propose
+    - openspec-explore
+    - openspec-apply-change
+    - openspec-update-change
+    - openspec-sync-specs
+    - openspec-archive-change
+  superpowers:
+    required: true
+    bootstrap_skill: using-superpowers

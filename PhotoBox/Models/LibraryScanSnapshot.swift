@@ -1,10 +1,11 @@
 import Foundation
 
-nonisolated struct LibraryScanSnapshot: Equatable, Sendable {
-    nonisolated enum Phase: Equatable, Sendable {
+nonisolated struct LibraryScanSnapshot: Codable, Equatable, Sendable {
+    nonisolated enum Phase: String, Codable, Equatable, Sendable {
         case idle
         case discovering
         case checkingLocalAvailability
+        case cancelled
         case completed
         case failed
     }

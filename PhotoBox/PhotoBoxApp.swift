@@ -12,7 +12,7 @@ struct PhotoBoxApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .tint(.photoBoxAccent)
+                .tint(.blue)
         }
     }
 }

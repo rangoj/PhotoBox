@@ -1,0 +1,43 @@
+{
+  "description": "Portable project AI coding workflow hooks.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/ruby \"$(git rev-parse --show-toplevel)/.codex/hooks/session_start.rb\"",
+            "timeout": 5,
+            "statusMessage": "Loading portable workflow context",
+            "additionalContextLimit": 3000
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|apply_patch|Edit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/ruby \"$(git rev-parse --show-toplevel)/.codex/hooks/protect_generated_files.rb\"",
+            "timeout": 5,
+            "statusMessage": "Checking generated-file policy"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/ruby \"$(git rev-parse --show-toplevel)/.codex/hooks/stop_reminder.rb\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

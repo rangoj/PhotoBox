@@ -1,0 +1,35 @@
+---
+version: 1
+manager_version: 3.0.2
+files:
+  ".ai-workflow/allowlists/debug-code.txt": a201aacb1dab9510e6929f9c576ff7ad83d932feb6e65ee0f13f1d4108e38bf5
+  ".ai-workflow/allowlists/secret-scan.txt": 6cfed81ba059b1fbba7242e8d8b128fab3d3b052911e296fc94f109213d39277
+  ".ai-workflow/config.yml": c70c15d777acb4a1efbd3a256d9fec62da96776d1227a100a7c17b3892feb066
+  ".ai-workflow/generated-files.yml": 906255f842571901080c24e40edb1f0a081497f8a0f48d70b449c11626971574
+  ".ai-workflow/templates/retrospective.md": 6008e3678e1cfc5bdc350daecb75ece53bb204f7d740329e81abd80884f487be
+  ".ai-workflow/templates/task.md": 132893b9148dd8b2b2ca23909220dd0509f5354d05251a83eafd083a639cd56f
+  ".ai-workflow/templates/verification-report.md": ca45f8bd7b6fc15e18d992bcdf981d0218acc88841740371b295ed8c3f5bb1cc
+  ".codex/agents/reviewer.toml": 5e01758debfba544901ffddf6f23a56729bb301d37a1fce46a830d553bc3c82e
+  ".codex/agents/test-reviewer.toml": 5a5cdc547e523e97eb0e7fd2bc7151bd625450ccef643b3093a29caa220ef147
+  ".codex/config.toml": aa84e1848f9d1e4cf46be91f032e09f8075a4779872285d08bcbd291b2e0187a
+  ".codex/hooks.json": 72af2bf0a39718b982ea7d4b3483c41811e76ef4c789ba5c0c513140d6def9bc
+  ".codex/hooks/protect_generated_files.rb": 5a305ce1da5db88724ae17751782ef2cbb65d9cdcf1b3bffb79ae9097ba6cfb3
+  ".codex/hooks/session_start.rb": ac4632c5609db44aa8bc49299c125654ec86b04eae198f9055eff1e8d973c5a8
+  ".codex/hooks/stop_reminder.rb": 94ffa58b0e59c124e3ed4e15de98265a200f247ca69b0a7977326e14cf2b82b5
+  AGENTS.md: 5b4ca8803b8bc7733a35a4c57ebe944eb09a9b77782b74e450747302c6aad656
+  Scripts/ai-workflow: 2022b55b5d42eaf7da728d52f623560dda73f8ee9f59440fe4da109e654ef58e
+  Scripts/ai_workflow/change_set.rb: 1391987cd2126e069d6b54f4f82f7f2afb17cfd6d1fd7a0aaa4ed48a47d3a445
+  Scripts/ai_workflow/configuration.rb: 9b26db94a512956d11c93e272126d4560a7766d80220c8607abb6756ba60d262
+  Scripts/ai_workflow/doctor.rb: a930c4318c9df2c6a7bfb057ba32decc645460e9515f0e116d90baca31c05fe1
+  Scripts/ai_workflow/reporter.rb: 2ead18015877916a37abae3564c6639bb1cd24806137c4984d25a0999da8b2a1
+  Scripts/ai_workflow/runner.rb: 4c283fcc134f303aeb812ce480889e71353b14814d8243463faa400f669b2b19
+  Scripts/ai_workflow/validator.rb: 596808c29f04a8e474beafad7b45e736a763ba86886a1a6a34151f72a263138e
+  Scripts/ai_workflow_test.rb: 894aa15fd22ad586f19cfd03e9b8fa56b5fad29ce6da387cd8b6e3b7cf234797
+  Scripts/ai_workflow_tests/change_set_test.rb: 60348249b462b9d5ec57cdec2cd4172d26a945dcdf788266fd86edd9b83a941c
+  Scripts/ai_workflow_tests/configuration_test.rb: 66ddf3b75b5448f24a9954838132961dacbb68f0c51417d93c84d5fa2f0dce93
+  Scripts/ai_workflow_tests/hooks_test.rb: 30172342f097e29416b717667533f068ec5a7c94379c2c6e1d263ec63468cb95
+  Scripts/ai_workflow_tests/integrations_test.rb: 750b6c9c21880ac979b672725987fcb5ff8644a4c3333f2160abdb712f0de305
+  Scripts/ai_workflow_tests/reporter_test.rb: 6655c7b7929dfca88dcd983d64e5ed97ac102c24e4d8ff81bbb3e74d01ced167
+  Scripts/ai_workflow_tests/test_helper.rb: 02e939cbc589fb02f03b5bbd396bfa1834d39790d9fbbeafff7052bbef7db16e
+  Scripts/ai_workflow_tests/validator_test.rb: a80c9251b68494f09b3325cf8e971ff25615264325e494f1420a96fafc39f69c
+  WORKFLOW.md: 268a0219695f4560f649a030d3ce2d846bbb7cdbf5b109328c91759054a2a3bd

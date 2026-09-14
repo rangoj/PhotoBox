@@ -1,8 +1,8 @@
 import SwiftUI
 
 extension Color {
-    static let photoBoxAccent = Color(red: 0.08, green: 0.48, blue: 0.42)
-    static let photoBoxWarm = Color(red: 0.86, green: 0.48, blue: 0.18)
+    static let photoBoxAccent = Color.blue
+    static let photoBoxWarm = Color.orange
 }
 
 struct SectionHeader: View {

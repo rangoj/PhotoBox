@@ -1,0 +1,1 @@
+# One Ruby regular expression per line. Keep exceptions narrow and justified.
