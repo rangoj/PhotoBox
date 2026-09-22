@@ -121,6 +121,7 @@ struct SinglePhotoDecisionScreen: View {
                 Text(dateSubtitle).font(.caption).foregroundStyle(.secondary)
                     .accessibilityIdentifier("decision-b01-position")
                     .accessibilityValue(model.positionText)
+                    .accessibilitySortPriority(1)
             }
             .multilineTextAlignment(.center)
             Spacer()
@@ -185,19 +186,26 @@ struct SinglePhotoDecisionScreen: View {
         GeometryReader { proxy in
             if !model.isCompleted, let descriptor = model.currentDescriptor {
                 if descriptor.availability != .local || isHeroUnavailable(descriptor.id) {
-                    VStack(spacing: 16) {
-                        ContentUnavailableView(
-                            "照片暂不可用",
-                            systemImage: "photo.badge.exclamationmark",
-                            description: Text("当前照片无法访问，已保存的整理进度仍在。")
-                        )
-                        Button("重新载入照片") { Task { await loadCurrentPhoto() } }
-                            .frame(minHeight: 44)
-                            .accessibilityIdentifier("decision-photo-retry")
+                    ZStack {
+                        VStack(spacing: 16) {
+                            ContentUnavailableView(
+                                "照片暂不可用",
+                                systemImage: "photo.badge.exclamationmark",
+                                description: Text("当前照片无法访问，已保存的整理进度仍在。")
+                            )
+                            Button("重新载入照片") { Task { await loadCurrentPhoto() } }
+                                .frame(minHeight: 44)
+                                .accessibilityIdentifier("decision-photo-retry")
+                        }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("decision-unavailable")
+                        Color.clear
+                            .frame(width: 1, height: 1)
+                            .accessibilityElement()
+                            .accessibilityIdentifier("decision-b01-photo")
+                            .accessibilityLabel("当前照片暂不可用")
                     }
                     .foregroundStyle(.white)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("decision-unavailable")
                 } else {
                   ZStack {
                     DecisionPhotoImage(state: heroStates[descriptor.id] ?? .loading)
@@ -209,22 +217,21 @@ struct SinglePhotoDecisionScreen: View {
                         .gesture(decisionGesture)
                         .simultaneousGesture(zoomGesture)
                         .simultaneousGesture(panGesture(in: proxy.size))
-                        .accessibilityHidden(true)
+                        .accessibilityIdentifier("decision-b01-photo")
+                        .accessibilityLabel("当前照片，可向左标记待删除，向右保留")
+                        .accessibilitySortPriority(0)
+                        .accessibilityAction(named: "待删除") { decideFromAccessibility(.deleteCandidate) }
+                        .accessibilityAction(named: "保留") { decideFromAccessibility(.keep) }
+                        .accessibilityAction(named: model.isCurrentFavorite ? "取消收藏" : "收藏") { model.requestFavoriteToggle() }
+                        .accessibilityAction(named: "加入相册") { model.requestArchive() }
+                        .accessibilityAction(named: "保护") { decideFromAccessibility(.protect) }
+                        .accessibilityAction(named: "稍后决定") { decideFromAccessibility(.decideLater) }
+                        .accessibilityAction(named: "重新载入照片") { Task { await loadCurrentPhoto() } }
                   }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .offset(x: dragOffset.width, y: albumFlow != nil && gestureDirection == nil ? 24 : dragOffset.height)
                     .rotationEffect(.degrees(Double(dragOffset.width / 100) * 3))
                     .contentShape(Rectangle())
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityIdentifier("decision-b01-photo")
-                    .accessibilityLabel("当前照片，可向左标记待删除，向右保留")
-                    .accessibilityAction(named: "待删除") { decideFromAccessibility(.deleteCandidate) }
-                    .accessibilityAction(named: "保留") { decideFromAccessibility(.keep) }
-                    .accessibilityAction(named: model.isCurrentFavorite ? "取消收藏" : "收藏") { model.requestFavoriteToggle() }
-                    .accessibilityAction(named: "加入相册") { model.requestArchive() }
-                    .accessibilityAction(named: "保护") { decideFromAccessibility(.protect) }
-                    .accessibilityAction(named: "稍后决定") { decideFromAccessibility(.decideLater) }
-                    .accessibilityAction(named: "重新载入照片") { Task { await loadCurrentPhoto() } }
                     .overlay(alignment: .leading) {
                         if gestureDirection == .left { horizontalFeedback(direction: .left) }
                     }
@@ -236,9 +243,16 @@ struct SinglePhotoDecisionScreen: View {
                 ContentUnavailableView("已完成整理", systemImage: "checkmark.circle")
                     .foregroundStyle(.white).accessibilityIdentifier("decision-complete")
             } else {
-                ContentUnavailableView("照片暂不可用", systemImage: "photo.badge.exclamationmark",
-                    description: Text("当前照片无法访问，已保存的整理进度仍在。"))
-                    .foregroundStyle(.white).accessibilityIdentifier("decision-unavailable")
+                ZStack {
+                    ContentUnavailableView("照片暂不可用", systemImage: "photo.badge.exclamationmark",
+                        description: Text("当前照片无法访问，已保存的整理进度仍在。"))
+                        .foregroundStyle(.white).accessibilityIdentifier("decision-unavailable")
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .accessibilityElement()
+                        .accessibilityIdentifier("decision-b01-photo")
+                        .accessibilityLabel("当前照片暂不可用")
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

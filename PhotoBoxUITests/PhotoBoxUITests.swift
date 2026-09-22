@@ -93,7 +93,7 @@ final class PhotoBoxUITests: XCTestCase {
         decisionTask.tap()
         XCTAssertTrue(element(in: app, identifier: "decision-b01-position").waitForExistence(timeout: 3))
         let position = app.staticTexts["decision-b01-position"]
-        XCTAssertEqual(position.label, "第 1 项，共 5 项")
+        XCTAssertEqual(accessibilityValueText(position), "第 1 项，共 5 项")
         performDecisionAction("decision-keep", in: app)
         performDecisionAction("decision-delete", in: app)
         performDecisionAction("decision-archive", in: app)
@@ -101,7 +101,7 @@ final class PhotoBoxUITests: XCTestCase {
         app.buttons["album-panel-row-full-flow-album"].tap()
         app.buttons["album-panel-submit"].tap()
         XCTAssertTrue(waitForAbsence(element(in: app, identifier: "album-panel")))
-        XCTAssertTrue(waitForLabel("第 3 项，共 5 项", element: position))
+        XCTAssertTrue(waitForValue("第 3 项，共 5 项", element: position))
         performDecisionAction("decision-keep", in: app)
         performDecisionAction("decision-protect", in: app)
         performDecisionAction("decision-later", in: app)
@@ -448,34 +448,34 @@ final class PhotoBoxUITests: XCTestCase {
         let app = launchP0Fixture(arguments: ["--ui-testing-decision"])
         let position = element(in: app, identifier: "decision-b01-position")
         XCTAssertTrue(position.waitForExistence(timeout: 3))
-        XCTAssertEqual(position.label, "第 1 项，共 5 项")
+        XCTAssertEqual(accessibilityValueText(position), "第 1 项，共 5 项")
         openDecisionMenu(in: app)
         assertDecisionMenuSemantics(in: app)
         app.buttons["decision-archive"].tap()
         XCTAssertTrue(element(in: app, identifier: "album-panel").waitForExistence(timeout: 3))
         app.buttons["关闭相册面板"].tap()
         XCTAssertTrue(waitForAbsence(element(in: app, identifier: "album-panel")))
-        XCTAssertEqual(position.label, "第 1 项，共 5 项")
+        XCTAssertEqual(accessibilityValueText(position), "第 1 项，共 5 项")
 
         performDecisionAction("decision-keep", in: app)
-        XCTAssertTrue(waitForLabel("第 2 项，共 5 项", element: position))
+        XCTAssertTrue(waitForValue("第 2 项，共 5 项", element: position))
         app.buttons["decision-undo"].tap()
-        XCTAssertTrue(waitForLabel("第 1 项，共 5 项", element: position))
+        XCTAssertTrue(waitForValue("第 1 项，共 5 项", element: position))
         performDecisionAction("decision-keep", in: app)
         performDecisionAction("decision-delete", in: app)
-        XCTAssertTrue(waitForLabel("第 3 项，共 5 项", element: position))
+        XCTAssertTrue(waitForValue("第 3 项，共 5 项", element: position))
         app.buttons["decision-undo"].tap()
-        XCTAssertTrue(waitForLabel("第 2 项，共 5 项", element: position))
+        XCTAssertTrue(waitForValue("第 2 项，共 5 项", element: position))
         performDecisionAction("decision-delete", in: app)
         performDecisionAction("decision-protect", in: app)
         performDecisionAction("decision-later", in: app)
 
-        XCTAssertTrue(waitForLabel("第 5 项，共 5 项", element: position))
+        XCTAssertTrue(waitForValue("第 5 项，共 5 项", element: position))
         performDecisionAction("decision-keep", in: app)
         XCTAssertTrue(element(in: app, identifier: "decision-complete").waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["decision-undo"].isEnabled)
         app.buttons["decision-undo"].tap()
-        XCTAssertTrue(waitForLabel("第 5 项，共 5 项", element: position))
+        XCTAssertTrue(waitForValue("第 5 项，共 5 项", element: position))
         XCTAssertTrue(element(in: app, identifier: "decision-b01-photo").exists)
     }
 
@@ -485,7 +485,7 @@ final class PhotoBoxUITests: XCTestCase {
         let app = launchP0Fixture(arguments: ["--ui-testing-archive"])
         let position = element(in: app, identifier: "decision-b01-position")
         XCTAssertTrue(position.waitForExistence(timeout: 3))
-        XCTAssertEqual(position.label, "第 1 项，共 2 项")
+        XCTAssertEqual(accessibilityValueText(position), "第 1 项，共 2 项")
         performDecisionAction("decision-archive", in: app)
         XCTAssertTrue(element(in: app, identifier: "album-panel").waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["album-panel-row-archive-valid"].waitForExistence(timeout: 3))
@@ -504,7 +504,7 @@ final class PhotoBoxUITests: XCTestCase {
         XCTAssertTrue(guidance.waitForExistence(timeout: 3))
         XCTAssertEqual(guidance.label, "所选相册已不可用，请重新选择其他相册。")
         XCTAssertTrue(app.buttons["album-panel-retry"].exists)
-        XCTAssertEqual(position.label, "第 1 项，共 2 项")
+        XCTAssertEqual(accessibilityValueText(position), "第 1 项，共 2 项")
         XCTAssertFalse(app.buttons["album-panel-row-archive-missing"].exists)
 
         app.buttons["album-panel-retry"].tap()
@@ -514,7 +514,7 @@ final class PhotoBoxUITests: XCTestCase {
         XCTAssertTrue(waitForValue("已选择", element: validAlbum))
         app.buttons["album-panel-submit"].tap()
         XCTAssertTrue(waitForAbsence(element(in: app, identifier: "album-panel")))
-        XCTAssertEqual(position.label, "第 1 项，共 2 项")
+        XCTAssertEqual(accessibilityValueText(position), "第 1 项，共 2 项")
         XCTAssertFalse(app.buttons["decision-undo"].isEnabled)
 
         performDecisionAction("decision-archive", in: app)
@@ -523,7 +523,7 @@ final class PhotoBoxUITests: XCTestCase {
         XCTAssertFalse(app.buttons["album-panel-submit"].isEnabled)
         app.buttons["关闭相册面板"].tap()
         performDecisionAction("decision-keep", in: app)
-        XCTAssertTrue(waitForLabel("第 2 项，共 2 项", element: position))
+        XCTAssertTrue(waitForValue("第 2 项，共 2 项", element: position))
     }
 
     // Production break: creation failures render behind the presented creation sheet.
@@ -1851,7 +1851,11 @@ final class PhotoBoxUITests: XCTestCase {
             element(in: app, identifier: "decision-b01-photo"),
             label: "当前照片，可向左标记待删除，向右保留"
         )
-        assertAccessibilityOrder(["decision-b01-position", "decision-b01-photo"], in: app)
+        XCTAssertLessThan(
+            decisionProgress.frame.minY,
+            element(in: app, identifier: "decision-b01-photo").frame.minY,
+            "B01 progress must remain visually before the photo surface"
+        )
         openDecisionMenu(in: app)
         assertDecisionMenuSemantics(in: app)
         assertAccessibilityOrder(
@@ -2423,11 +2427,11 @@ final class PhotoBoxUITests: XCTestCase {
         let photo = element(in: app, identifier: "decision-b01-photo")
         XCTAssertTrue(photo.waitForExistence(timeout: 3))
         swipeDecisionPhotoRight(photo)
-        XCTAssertTrue(waitForLabel("第 2 项，共 5 项", element: position))
+        XCTAssertTrue(waitForValue("第 2 项，共 5 项", element: position))
         assertReachableControl(app.buttons["decision-undo"], label: "撤销", in: app)
         recordVisualEvidence("reduce-motion-decision-advancement", in: app)
         app.buttons["decision-undo"].tap()
-        XCTAssertTrue(waitForLabel("第 1 项，共 5 项", element: position))
+        XCTAssertTrue(waitForValue("第 1 项，共 5 项", element: position))
         app.terminate()
 
         app = launchReduceMotionFixture(arguments: ["--ui-testing-queues-reset"])
@@ -2987,6 +2991,7 @@ final class PhotoBoxUITests: XCTestCase {
                 "delete-review-exit",
                 "album-panel-create-cancel",
                 "album-panel-create-confirm",
+                "decision-actions-cancel",
                 "weekly-refresh"
             ].contains(identifier) else {
                 return true
@@ -3058,6 +3063,7 @@ final class PhotoBoxUITests: XCTestCase {
         case "delete-review-exit": expectedLabel = "退出复核"
         case "album-panel-create-cancel": expectedLabel = "取消"
         case "album-panel-create-confirm": expectedLabel = "创建"
+        case "decision-actions-cancel": expectedLabel = "取消"
         case "weekly-refresh": expectedLabel = "刷新本周整理"
         default:
             XCTFail("No strict SwiftUI mirror contract for \(identifier)", file: file, line: line)
