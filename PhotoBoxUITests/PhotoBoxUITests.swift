@@ -91,20 +91,23 @@ final class PhotoBoxUITests: XCTestCase {
         let decisionTask = app.buttons["diagnosis-task-action-full-flow-decisions"]
         XCTAssertTrue(decisionTask.waitForExistence(timeout: 3))
         decisionTask.tap()
-        XCTAssertTrue(app.navigationBars["整理照片"].waitForExistence(timeout: 3))
-        let position = app.staticTexts["decision-position"]
+        XCTAssertTrue(element(in: app, identifier: "decision-b01-position").waitForExistence(timeout: 3))
+        let position = app.staticTexts["decision-b01-position"]
         XCTAssertEqual(position.label, "第 1 项，共 5 项")
-        app.buttons["decision-keep"].tap()
-        app.buttons["decision-delete"].tap()
-        app.buttons["decision-archive"].tap()
-        XCTAssertTrue(app.navigationBars["选择相册"].waitForExistence(timeout: 3))
-        app.buttons["album-recent-row-full-flow-album"].tap()
-        XCTAssertTrue(app.navigationBars["整理照片"].waitForExistence(timeout: 3))
-        app.buttons["decision-protect"].tap()
-        app.buttons["decision-later"].tap()
+        performDecisionAction("decision-keep", in: app)
+        performDecisionAction("decision-delete", in: app)
+        performDecisionAction("decision-archive", in: app)
+        XCTAssertTrue(element(in: app, identifier: "album-panel").waitForExistence(timeout: 3))
+        app.buttons["album-panel-row-full-flow-album"].tap()
+        app.buttons["album-panel-submit"].tap()
+        XCTAssertTrue(waitForAbsence(element(in: app, identifier: "album-panel")))
+        XCTAssertTrue(waitForLabel("第 3 项，共 5 项", element: position))
+        performDecisionAction("decision-keep", in: app)
+        performDecisionAction("decision-protect", in: app)
+        performDecisionAction("decision-later", in: app)
         XCTAssertTrue(element(in: app, identifier: "decision-complete").waitForExistence(timeout: 3))
 
-        app.navigationBars.buttons.firstMatch.tap()
+        app.buttons["decision-back"].tap()
         let reviewRoute = app.buttons["delete-review-route"]
         XCTAssertTrue(reviewRoute.waitForExistence(timeout: 3))
         reviewRoute.tap()
@@ -442,109 +445,104 @@ final class PhotoBoxUITests: XCTestCase {
 
     @MainActor
     func testDecisionFixtureExposesEveryLabeledActionWithoutSwipeGestures() throws {
-        let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing-decision"]
-        app.launch()
-
-        XCTAssertTrue(app.navigationBars["整理照片"].waitForExistence(timeout: 3))
-        let position = app.staticTexts["decision-position"]
+        let app = launchP0Fixture(arguments: ["--ui-testing-decision"])
+        let position = element(in: app, identifier: "decision-b01-position")
         XCTAssertTrue(position.waitForExistence(timeout: 3))
-        for identifier in ["decision-keep", "decision-delete", "decision-archive", "decision-protect", "decision-later"] {
-            XCTAssertTrue(app.buttons[identifier].exists, "Missing \(identifier)")
-        }
         XCTAssertEqual(position.label, "第 1 项，共 5 项")
-
+        openDecisionMenu(in: app)
+        assertDecisionMenuSemantics(in: app)
         app.buttons["decision-archive"].tap()
-        XCTAssertTrue(app.navigationBars["选择相册"].waitForExistence(timeout: 3))
-        app.navigationBars.buttons.firstMatch.tap()
-        XCTAssertTrue(position.waitForExistence(timeout: 3))
+        XCTAssertTrue(element(in: app, identifier: "album-panel").waitForExistence(timeout: 3))
+        app.buttons["关闭相册面板"].tap()
+        XCTAssertTrue(waitForAbsence(element(in: app, identifier: "album-panel")))
         XCTAssertEqual(position.label, "第 1 项，共 5 项")
 
-        app.buttons["decision-keep"].tap()
-        XCTAssertTrue(app.buttons["decision-undo"].waitForExistence(timeout: 3))
-        XCTAssertEqual(position.label, "第 2 项，共 5 项")
+        performDecisionAction("decision-keep", in: app)
+        XCTAssertTrue(waitForLabel("第 2 项，共 5 项", element: position))
         app.buttons["decision-undo"].tap()
-        XCTAssertEqual(position.label, "第 1 项，共 5 项")
-        app.buttons["decision-keep"].tap()
-
-        app.buttons["decision-delete"].tap()
-        XCTAssertEqual(app.staticTexts["decision-reclaimable-bytes"].value as? String, "1,000")
+        XCTAssertTrue(waitForLabel("第 1 项，共 5 项", element: position))
+        performDecisionAction("decision-keep", in: app)
+        performDecisionAction("decision-delete", in: app)
+        XCTAssertTrue(waitForLabel("第 3 项，共 5 项", element: position))
         app.buttons["decision-undo"].tap()
-        XCTAssertEqual(app.staticTexts["decision-reclaimable-bytes"].value as? String, "0")
-        app.buttons["decision-delete"].tap()
-        app.buttons["decision-protect"].tap()
-        app.buttons["decision-later"].tap()
+        XCTAssertTrue(waitForLabel("第 2 项，共 5 项", element: position))
+        performDecisionAction("decision-delete", in: app)
+        performDecisionAction("decision-protect", in: app)
+        performDecisionAction("decision-later", in: app)
 
-        XCTAssertEqual(position.label, "第 5 项，共 5 项")
-        XCTAssertEqual(app.staticTexts["decision-pending-count"].value as? String, "4")
-        app.buttons["decision-keep"].tap()
+        XCTAssertTrue(waitForLabel("第 5 项，共 5 项", element: position))
+        performDecisionAction("decision-keep", in: app)
         XCTAssertTrue(element(in: app, identifier: "decision-complete").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["decision-undo"].exists)
+        XCTAssertTrue(app.buttons["decision-undo"].isEnabled)
         app.buttons["decision-undo"].tap()
-        XCTAssertEqual(position.label, "第 5 项，共 5 项")
-        XCTAssertTrue(app.buttons["decision-keep"].exists)
+        XCTAssertTrue(waitForLabel("第 5 项，共 5 项", element: position))
+        XCTAssertTrue(element(in: app, identifier: "decision-b01-photo").exists)
     }
 
-    // Production break: a disappeared archive target loses the routed asset, hides recovery, or reaches live PhotoKit.
+    // Production break: a missing album loses recovery, or adding to an album implicitly advances the decision.
     @MainActor
-    func testAlbumArchiveFixtureRecoversFromMissingTargetAndReturnsToNextItem() throws {
-        let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing-archive"]
-        app.launch()
-
-        XCTAssertTrue(app.navigationBars["整理照片"].waitForExistence(timeout: 3))
-        let position = app.staticTexts["decision-position"]
+    func testAlbumArchiveFixtureRecoversFromMissingTargetAndStaysOnCurrentItem() throws {
+        let app = launchP0Fixture(arguments: ["--ui-testing-archive"])
+        let position = element(in: app, identifier: "decision-b01-position")
         XCTAssertTrue(position.waitForExistence(timeout: 3))
         XCTAssertEqual(position.label, "第 1 项，共 2 项")
-        app.buttons["decision-archive"].tap()
+        performDecisionAction("decision-archive", in: app)
+        XCTAssertTrue(element(in: app, identifier: "album-panel").waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["album-panel-row-archive-valid"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["album-panel-row-archive-missing"].exists)
+        XCTAssertFalse(app.buttons["album-panel-submit"].isEnabled)
 
-        XCTAssertTrue(app.navigationBars["选择相册"].waitForExistence(timeout: 3))
-        XCTAssertTrue(element(in: app, identifier: "album-list").waitForExistence(timeout: 3))
-        XCTAssertTrue(element(in: app, identifier: "album-recent-section").exists)
-        XCTAssertTrue(app.buttons["album-recent-row-archive-valid"].exists)
-        XCTAssertTrue(app.buttons["album-system-row-archive-missing"].exists)
-        XCTAssertEqual(app.staticTexts["album-current-asset"].value as? String, "等待选择归档相册")
+        app.buttons["album-panel-create"].tap()
+        XCTAssertTrue(app.textFields["album-panel-create-name"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["album-panel-create-confirm"].isEnabled)
+        app.buttons["album-panel-create-cancel"].tap()
 
-        app.buttons["album-create-command"].tap()
-        XCTAssertTrue(app.textFields["album-create-name"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["album-create-confirm"].exists)
-        app.buttons["album-create-cancel"].tap()
+        app.buttons["album-panel-row-archive-missing"].tap()
+        XCTAssertTrue(waitForValue("已选择", element: app.buttons["album-panel-row-archive-missing"]))
+        app.buttons["album-panel-submit"].tap()
+        let guidance = app.staticTexts["album-panel-error"]
+        XCTAssertTrue(guidance.waitForExistence(timeout: 3))
+        XCTAssertEqual(guidance.label, "所选相册已不可用，请重新选择其他相册。")
+        XCTAssertTrue(app.buttons["album-panel-retry"].exists)
+        XCTAssertEqual(position.label, "第 1 项，共 2 项")
+        XCTAssertFalse(app.buttons["album-panel-row-archive-missing"].exists)
 
-        app.buttons["album-system-row-archive-missing"].tap()
-        XCTAssertTrue(app.staticTexts["album-error-guidance"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["album-reselection-action"].exists)
-        XCTAssertEqual(app.staticTexts["album-current-asset"].value as? String, "等待选择归档相册")
-        XCTAssertFalse(app.buttons["album-system-row-archive-missing"].exists)
+        app.buttons["album-panel-retry"].tap()
+        let validAlbum = app.buttons["album-panel-row-archive-valid"]
+        XCTAssertTrue(validAlbum.waitForExistence(timeout: 3))
+        validAlbum.tap()
+        XCTAssertTrue(waitForValue("已选择", element: validAlbum))
+        app.buttons["album-panel-submit"].tap()
+        XCTAssertTrue(waitForAbsence(element(in: app, identifier: "album-panel")))
+        XCTAssertEqual(position.label, "第 1 项，共 2 项")
+        XCTAssertFalse(app.buttons["decision-undo"].isEnabled)
 
-        app.buttons["album-reselection-action"].tap()
-        XCTAssertTrue(app.buttons["album-recent-row-archive-valid"].waitForExistence(timeout: 3))
-        app.buttons["album-recent-row-archive-valid"].tap()
-
-        XCTAssertTrue(app.navigationBars["整理照片"].waitForExistence(timeout: 3))
-        XCTAssertTrue(position.waitForExistence(timeout: 3))
-        XCTAssertEqual(position.label, "第 2 项，共 2 项")
+        performDecisionAction("decision-archive", in: app)
+        XCTAssertTrue(waitForValue("已在相册", element: validAlbum))
+        XCTAssertFalse(validAlbum.isEnabled)
+        XCTAssertFalse(app.buttons["album-panel-submit"].isEnabled)
+        app.buttons["关闭相册面板"].tap()
+        performDecisionAction("decision-keep", in: app)
+        XCTAssertTrue(waitForLabel("第 2 项，共 2 项", element: position))
     }
 
-    // Production break: non-validation album creation failures render only behind the presented sheet.
+    // Production break: creation failures render behind the presented creation sheet.
     @MainActor
     func testAlbumCreationFailureGuidanceRemainsVisibleInSheet() throws {
-        let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing-archive-create-failure"]
-        app.launch()
-
-        XCTAssertTrue(app.navigationBars["整理照片"].waitForExistence(timeout: 3))
-        app.buttons["decision-archive"].tap()
-        XCTAssertTrue(app.navigationBars["选择相册"].waitForExistence(timeout: 3))
-        app.buttons["album-create-command"].tap()
-        let name = app.textFields["album-create-name"]
+        let app = launchP0Fixture(arguments: ["--ui-testing-archive-create-failure"])
+        performDecisionAction("decision-archive", in: app)
+        XCTAssertTrue(element(in: app, identifier: "album-panel").waitForExistence(timeout: 3))
+        app.buttons["album-panel-create"].tap()
+        let name = app.textFields["album-panel-create-name"]
         XCTAssertTrue(name.waitForExistence(timeout: 3))
         name.tap()
         name.typeText("旅行")
-        app.buttons["album-create-confirm"].tap()
+        app.buttons["album-panel-create-confirm"].tap()
 
-        let guidance = app.staticTexts["album-create-error"]
+        let guidance = app.staticTexts["album-panel-create-error"]
         XCTAssertTrue(guidance.waitForExistence(timeout: 3))
         XCTAssertEqual(guidance.label, "无法创建相册，请稍后重试。")
+        XCTAssertTrue(guidance.isHittable)
         XCTAssertTrue(app.navigationBars["新建相册"].exists)
     }
 
@@ -840,8 +838,8 @@ final class PhotoBoxUITests: XCTestCase {
 
         app.buttons["weekly-start-weekly:1:weekly-expired"].tap()
 
-        XCTAssertTrue(app.navigationBars["整理照片"].waitForExistence(timeout: 3))
-        XCTAssertTrue(element(in: app, identifier: "decision-position").exists)
+        XCTAssertTrue(element(in: app, identifier: "decision-b01-position").waitForExistence(timeout: 3))
+        XCTAssertTrue(element(in: app, identifier: "decision-b01-position").exists)
     }
 
     // Production break: an empty weekly period fabricates work or offers no refresh/return path.
@@ -944,7 +942,7 @@ final class PhotoBoxUITests: XCTestCase {
 
         XCTAssertTrue(app.navigationBars["本周收件箱"].waitForExistence(timeout: 3))
         app.buttons["weekly-start-weekly:1:weekly-expired"].tap()
-        XCTAssertTrue(app.navigationBars["整理照片"].waitForExistence(timeout: 3))
+        XCTAssertTrue(element(in: app, identifier: "decision-b01-position").waitForExistence(timeout: 3))
         navigateToStatistics(in: app)
         app.buttons["完整重新扫描"].tap()
         navigateToTaskDashboard(in: app)
@@ -1371,16 +1369,7 @@ final class PhotoBoxUITests: XCTestCase {
 
     @MainActor
     func testAccessibilityMirrorContractsMatchExactSwiftUIRepresentations() throws {
-        var app = launchP0Fixture(arguments: ["--ui-testing-archive"])
-        app.buttons["decision-archive"].tap()
-        assertVerifiedSwiftUIMirror(identifier: "album-create-command", in: app)
-        app.buttons["album-create-command"].tap()
-        assertVerifiedSwiftUIMirror(identifier: "album-create-command", in: app)
-        assertVerifiedSwiftUIMirror(identifier: "album-create-cancel", in: app)
-        assertVerifiedSwiftUIMirror(identifier: "album-create-confirm", in: app)
-        app.terminate()
-
-        app = launchP0Fixture(arguments: ["--ui-testing-weekly-load-failure"])
+        var app = launchP0Fixture(arguments: ["--ui-testing-weekly-load-failure"])
         assertVerifiedSwiftUIMirror(identifier: "weekly-refresh", in: app)
         app.terminate()
 
@@ -1497,13 +1486,12 @@ final class PhotoBoxUITests: XCTestCase {
             ], in: app)
         }
         auditP0Fixture(arguments: ["--ui-testing-decision"]) { app in
-            assertAccessibilityManifest([
-                .init("decision-keep", .button, "保留", enabled: true),
-                .init("decision-delete", .button, "删除", enabled: true),
-                .init("decision-archive", .button, "归档", enabled: true),
-                .init("decision-protect", .button, "保护", enabled: true),
-                .init("decision-later", .button, "稍后决定", enabled: true)
-            ], in: app)
+            assertAccessibility(
+                element(in: app, identifier: "decision-b01-photo"),
+                label: "当前照片，可向左标记待删除，向右保留"
+            )
+            openDecisionMenu(in: app)
+            assertDecisionMenuSemantics(in: app)
         }
     }
 
@@ -1512,43 +1500,43 @@ final class PhotoBoxUITests: XCTestCase {
     @MainActor
     func testAccessibilityManifestCoversAlbumsDeleteResultsAndQueues() throws {
         auditP0Fixture(arguments: ["--ui-testing-archive"]) { app in
-            app.buttons["decision-archive"].tap()
+            performDecisionAction("decision-archive", in: app)
             assertAccessibilityManifest([
-                .init("album-current-asset", .staticText, "当前照片", value: "等待选择归档相册"),
-                .init("album-create-command", .button, "新建相册", enabled: true),
-                .init("album-recent-row-archive-valid", .button, "选择相册，旅行", value: "包含 0 项", enabled: true),
-                .init("album-system-row-archive-missing", .button, "选择相册，会消失的相册", value: "包含 0 项", enabled: true)
+                .init("album-panel-create", .button, "新建相册", enabled: true),
+                .init("album-panel-row-archive-valid", .button, "选择相册，旅行", value: "未选择", enabled: true),
+                .init("album-panel-row-archive-missing", .button, "选择相册，会消失的相册", value: "未选择", enabled: true)
             ], in: app)
-            app.buttons["album-create-command"].tap()
+            app.buttons["album-panel-create"].tap()
             assertAccessibilityManifest([
-                .init("album-create-name", .textField, "相册名称", enabled: true),
-                .init("album-create-cancel", .button, "取消", enabled: true),
-                .init("album-create-confirm", .button, "创建", enabled: true)
+                .init("album-panel-create-name", .textField, "相册名称", enabled: true),
+                .init("album-panel-create-cancel", .button, "取消", enabled: true),
+                .init("album-panel-create-confirm", .button, "创建", enabled: false)
             ], in: app)
         }
         auditP0Fixture(arguments: ["--ui-testing-archive-create-failure"]) { app in
-            app.buttons["decision-archive"].tap()
-            app.buttons["album-create-command"].tap()
-            let name = app.textFields["album-create-name"]
+            performDecisionAction("decision-archive", in: app)
+            app.buttons["album-panel-create"].tap()
+            let name = app.textFields["album-panel-create-name"]
             XCTAssertTrue(name.waitForExistence(timeout: 3))
             name.tap()
             name.typeText("旅行")
-            app.buttons["album-create-confirm"].tap()
+            app.buttons["album-panel-create-confirm"].tap()
             assertAccessibilityManifest([
-                .init("album-create-error", .staticText, "无法创建相册，请稍后重试。"),
-                .init("album-create-confirm", .button, "创建", enabled: true)
+                .init("album-panel-create-error", .staticText, "无法创建相册，请稍后重试。"),
+                .init("album-panel-create-confirm", .button, "创建", enabled: true)
             ], in: app)
         }
         auditP0Fixture(arguments: ["--ui-testing-archive"]) { app in
-            app.buttons["decision-archive"].tap()
-            app.buttons["album-system-row-archive-missing"].tap()
+            performDecisionAction("decision-archive", in: app)
+            app.buttons["album-panel-row-archive-missing"].tap()
+            app.buttons["album-panel-submit"].tap()
             assertAccessibilityManifest([
-                .init("album-error-guidance", .staticText, "所选相册已不可用，请重新选择其他相册。"),
-                .init("album-reselection-action", .button, "重新选择相册", value: "", enabled: true)
+                .init("album-panel-error", .staticText, "所选相册已不可用，请重新选择其他相册。"),
+                .init("album-panel-retry", .button, "重新选择相册", value: "", enabled: true)
             ], in: app)
-            app.buttons["album-reselection-action"].tap()
+            app.buttons["album-panel-retry"].tap()
             assertAccessibilityManifest([
-                .init("album-recent-row-archive-valid", .button, "选择相册，旅行", value: "包含 0 项", enabled: true)
+                .init("album-panel-row-archive-valid", .button, "选择相册，旅行", value: "未选择", enabled: true)
             ], in: app)
         }
         auditP0Fixture(arguments: ["--ui-testing-delete-review"]) { app in
@@ -1856,15 +1844,16 @@ final class PhotoBoxUITests: XCTestCase {
         app.terminate()
 
         app = launchP0Fixture(arguments: ["--ui-testing-decision"])
-        for (identifier, label) in [
-            ("decision-keep", "保留"),
-            ("decision-delete", "删除"),
-            ("decision-archive", "归档"),
-            ("decision-protect", "保护"),
-            ("decision-later", "稍后决定")
-        ] {
-            assertAccessibility(app.buttons[identifier], label: label)
-        }
+        let decisionProgress = element(in: app, identifier: "decision-b01-position")
+        XCTAssertTrue(decisionProgress.label.contains("已整理 0/5"))
+        XCTAssertEqual(accessibilityValueText(decisionProgress), "第 1 项，共 5 项")
+        assertAccessibility(
+            element(in: app, identifier: "decision-b01-photo"),
+            label: "当前照片，可向左标记待删除，向右保留"
+        )
+        assertAccessibilityOrder(["decision-b01-position", "decision-b01-photo"], in: app)
+        openDecisionMenu(in: app)
+        assertDecisionMenuSemantics(in: app)
         assertAccessibilityOrder(
             ["decision-keep", "decision-delete", "decision-archive", "decision-protect", "decision-later"],
             in: app
@@ -2027,7 +2016,7 @@ final class PhotoBoxUITests: XCTestCase {
     }
 
     // Production break: accessibility-size text pushes onboarding or decision
-    // commands off screen, leaves the three-column decision grid in place, or
+    // commands off screen, hides the equivalent B01 menu actions, or
     // lets comparison actions overlap their media metadata.
     @MainActor
     func testAccessibilityDynamicTypeReflowsPermissionTasksComparisonAndDecision() throws {
@@ -2079,24 +2068,19 @@ final class PhotoBoxUITests: XCTestCase {
         app.terminate()
 
         app = launchAccessibilityFixture(arguments: ["--ui-testing-decision"])
+        assertReachableControl(app.buttons["decision-more"], label: "更多操作", in: app)
+        openDecisionMenu(in: app)
         let decisionButtons = [
-            app.buttons["decision-keep"],
-            app.buttons["decision-delete"],
-            app.buttons["decision-archive"],
-            app.buttons["decision-protect"],
+            app.buttons["decision-keep"], app.buttons["decision-delete"],
+            app.buttons["decision-archive"], app.buttons["decision-protect"],
             app.buttons["decision-later"]
         ]
-        let decisionLabels = ["保留", "删除", "归档", "保护", "稍后决定"]
+        let decisionLabels = ["保留", "待删除", "加入相册", "保护", "稍后决定"]
         for (button, label) in zip(decisionButtons, decisionLabels) {
             assertReachableControl(button, label: label, in: app)
         }
         for (preceding, following) in zip(decisionButtons, decisionButtons.dropFirst()) {
-            XCTAssertGreaterThanOrEqual(
-                following.frame.minY,
-                preceding.frame.maxY,
-                "Accessibility-size decision actions must form a vertical, scrollable sequence"
-            )
-            assertNonOverlapping(preceding, following, message: "Decision actions overlap")
+            assertNonOverlapping(preceding, following, message: "Decision menu actions overlap")
         }
         recordVisualEvidence("dynamic-type-single-decision", in: app)
         app.terminate()
@@ -2434,11 +2418,11 @@ final class PhotoBoxUITests: XCTestCase {
         app.terminate()
 
         app = launchReduceMotionFixture(arguments: ["--ui-testing-decision"])
-        let position = app.staticTexts["decision-position"]
+        let position = app.staticTexts["decision-b01-position"]
         XCTAssertTrue(position.waitForExistence(timeout: 3))
-        assertReachableControl(app.buttons["decision-keep"], label: "保留", in: app)
-        app.buttons["decision-keep"].tap()
-        assertMotionProbe("motion-probe-decision", in: app)
+        let photo = element(in: app, identifier: "decision-b01-photo")
+        XCTAssertTrue(photo.waitForExistence(timeout: 3))
+        swipeDecisionPhotoRight(photo)
         XCTAssertTrue(waitForLabel("第 2 项，共 5 项", element: position))
         assertReachableControl(app.buttons["decision-undo"], label: "撤销", in: app)
         recordVisualEvidence("reduce-motion-decision-advancement", in: app)
@@ -2552,6 +2536,48 @@ final class PhotoBoxUITests: XCTestCase {
             backButton.tap()
         }
         XCTAssertTrue(app.tabBars.buttons["我的"].waitForExistence(timeout: 3))
+    }
+
+    @MainActor
+    private func openDecisionMenu(in app: XCUIApplication) {
+        let menu = app.buttons["decision-more"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 3))
+        menu.tap()
+        XCTAssertTrue(app.buttons["decision-keep"].waitForExistence(timeout: 3))
+    }
+
+    @MainActor
+    private func performDecisionAction(_ identifier: String, in app: XCUIApplication) {
+        openDecisionMenu(in: app)
+        let action = app.buttons[identifier]
+        XCTAssertTrue(action.waitForExistence(timeout: 3), identifier)
+        action.tap()
+        XCTAssertTrue(waitForAbsence(app.buttons["decision-keep"]))
+    }
+
+    @MainActor
+    private func assertDecisionMenuSemantics(in app: XCUIApplication) {
+        assertAccessibilityManifest([
+            .init("decision-keep", .button, "保留", enabled: true),
+            .init("decision-delete", .button, "待删除", enabled: true),
+            .init("decision-archive", .button, "加入相册", enabled: true),
+            .init("decision-protect", .button, "保护", enabled: true),
+            .init("decision-later", .button, "稍后决定", enabled: true)
+        ], in: app)
+    }
+
+    @MainActor
+    private func waitForAbsence(_ element: XCUIElement) -> Bool {
+        XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: element
+        )], timeout: 5) == .completed
+    }
+
+    @MainActor
+    private func swipeDecisionPhotoRight(_ photo: XCUIElement) {
+        let start = photo.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
+        let end = start.withOffset(CGVector(dx: 160, dy: 0))
+        start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0)
     }
 
     @MainActor
@@ -2955,24 +2981,28 @@ final class PhotoBoxUITests: XCTestCase {
         }
         let unexpectedDuplicates = duplicates.filter { identifier in
             guard [
-                "album-create-cancel",
-                "album-create-command",
-                "album-create-confirm",
                 "cleanup-results-retry-confirm",
                 "cleanup-results-return",
                 "delete-review-confirm-final",
                 "delete-review-exit",
+                "album-panel-create-cancel",
+                "album-panel-create-confirm",
                 "weekly-refresh"
             ].contains(identifier) else {
                 return true
             }
             let isWeeklyLoading = identifier == "weekly-refresh"
                 && element(in: app, identifier: "weekly-loading").exists
+            let mirrorElements = groups[identifier] ?? []
+            let buttonEnabled = mirrorElements
+                .first(where: { $0.elementType == .button })?.isEnabled ?? true
+            let otherEnabled = mirrorElements
+                .first(where: { $0.elementType == .other })?.isEnabled
             assertVerifiedSwiftUIMirror(
                 identifier: identifier,
                 elements: groups[identifier] ?? [],
-                buttonEnabled: !isWeeklyLoading,
-                otherEnabled: isWeeklyLoading ? true : nil,
+                buttonEnabled: identifier == "weekly-refresh" ? !isWeeklyLoading : buttonEnabled,
+                otherEnabled: identifier == "weekly-refresh" ? (isWeeklyLoading ? true : nil) : otherEnabled,
                 file: file,
                 line: line
             )
@@ -3022,13 +3052,12 @@ final class PhotoBoxUITests: XCTestCase {
     ) {
         let expectedLabel: String
         switch identifier {
-        case "album-create-cancel": expectedLabel = "取消"
-        case "album-create-command": expectedLabel = "新建相册"
-        case "album-create-confirm": expectedLabel = "创建"
         case "cleanup-results-retry-confirm": expectedLabel = "确认重试删除"
         case "cleanup-results-return": expectedLabel = "返回任务"
         case "delete-review-confirm-final": expectedLabel = "确认删除"
         case "delete-review-exit": expectedLabel = "退出复核"
+        case "album-panel-create-cancel": expectedLabel = "取消"
+        case "album-panel-create-confirm": expectedLabel = "创建"
         case "weekly-refresh": expectedLabel = "刷新本周整理"
         default:
             XCTFail("No strict SwiftUI mirror contract for \(identifier)", file: file, line: line)
@@ -3056,7 +3085,7 @@ final class PhotoBoxUITests: XCTestCase {
             }
             assertCoincidentFrames(buttons[0], buttons[1], identifier: identifier, file: file, line: line)
             XCTAssertEqual(buttons[0].isHittable, buttons[1].isHittable, "\(identifier) hittable", file: file, line: line)
-        case "album-create-command", "weekly-refresh":
+        case "weekly-refresh":
             XCTAssertEqual(otherNodes.count, 1, "\(identifier) .other count", file: file, line: line)
             XCTAssertEqual(buttons.count, 1, "\(identifier) button count", file: file, line: line)
             guard let other = otherNodes.first, let button = buttons.first else { return }

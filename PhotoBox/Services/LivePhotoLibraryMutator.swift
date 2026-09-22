@@ -1,7 +1,7 @@
 import Foundation
 import Photos
 
-actor LivePhotoLibraryMutator: PhotoLibraryMutating {
+actor LivePhotoLibraryMutator: PhotoLibraryMutating, PhotoFavoriteMutating {
     let backendMode = MutationBackendMode.live
 
     func availableAssetIDs(for requestedIDs: [String]) -> Set<String> {
@@ -119,6 +119,20 @@ actor LivePhotoLibraryMutator: PhotoLibraryMutating {
         return PhotoMutationBatch(operation: .delete, items: items, targetAlbumID: nil)
     }
 
+    func setFavorite(_ isFavorite: Bool, forAssetID assetID: String) async -> Bool {
+        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject else {
+            return false
+        }
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest(for: asset).isFavorite = isFavorite
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
     private func resolved(
         _ items: [MutationItem],
         state: MutationItemState,
@@ -132,10 +146,12 @@ actor LivePhotoLibraryMutator: PhotoLibraryMutating {
     }
 
     private static func descriptor(for collection: PHAssetCollection) -> PhotoAlbumDescriptor {
-        PhotoAlbumDescriptor(
+        let assets = PHAsset.fetchAssets(in: collection, options: nil)
+        return PhotoAlbumDescriptor(
             id: collection.localIdentifier,
             title: collection.localizedTitle ?? "未命名相册",
-            assetCount: PHAsset.fetchAssets(in: collection, options: nil).count
+            assetCount: assets.count,
+            coverAssetID: assets.firstObject?.localIdentifier
         )
     }
 

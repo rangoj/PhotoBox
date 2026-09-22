@@ -108,7 +108,14 @@ private struct TaskRouteView: View {
                 DiagnosisReportView(model: model)
             case .task(let taskID):
                 if let decisionFlow = model.singleDecisionFlow(for: taskID) {
-                    SinglePhotoDecisionScreen(model: decisionFlow, loader: model.thumbnailLoader)
+                    SinglePhotoDecisionScreen(
+                        model: decisionFlow,
+                        loader: model.thumbnailLoader,
+                        albumFlow: model.inlineAlbumAssetID == decisionFlow.currentDescriptor?.id
+                            ? model.albumSelectionFlow
+                            : nil,
+                        onDismissAlbumPanel: { model.closeInlineAlbumPanel() }
+                    )
                 } else {
                     SingleDecisionRouteView(taskID: taskID, model: model)
                 }

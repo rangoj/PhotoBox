@@ -95,6 +95,180 @@ struct AlbumArchiveFlowTests {
         #expect(completionCount == 1)
     }
 
+    // Production break: the last inline target records a cleanup decision or advances the current photo.
+    @Test("Inline multi-target addition preserves the cleanup task and decision")
+    func multiTargetAdditionStaysOnCurrentPhoto() async throws {
+        let repository = try SwiftDataTaskRepository(inMemory: true)
+        let task = makeTask(assetIDs: ["asset", "next"])
+        try repository.save(task: task)
+        let active = try TaskLifecycleController(repository: repository).start(taskID: task.id)
+        let prior = PhotoDecision(assetID: "asset", kind: .deleteCandidate, estimatedBytes: 10_000, taskID: task.id)
+        try repository.save(decision: prior)
+        let mutator = SimulatedPhotoLibraryMutator(
+            assetIDs: ["asset", "next"],
+            albums: [album(id: "first", title: "A"), album(id: "second", title: "B")]
+        )
+        var archiveCount = 0
+        var selectionCount = 0
+        let flow = AlbumSelectionFlow(
+            assetID: "asset", taskID: task.id, estimatedBytes: 10_000,
+            repository: repository, mutator: mutator,
+            onArchiveSucceeded: { _ in archiveCount += 1 },
+            onSelectionSucceeded: { selectionCount += 1 }
+        )
+        await flow.loadAlbums()
+        flow.selectAlbumForAddition(id: "first")
+        flow.selectAlbumForAddition(id: "first")
+        flow.selectAlbumForAddition(id: "second")
+        #expect(flow.selectedAlbumCount == 2)
+        await flow.submitSelectedAlbums()
+        await flow.submitSelectedAlbums()
+
+        #expect(try repository.tasks().first == active)
+        #expect(try repository.decision(for: "asset") == prior)
+        #expect(await mutator.archivedAssetIDs(for: ["asset"], inAlbumID: "first") == ["asset"])
+        #expect(await mutator.archivedAssetIDs(for: ["asset"], inAlbumID: "second") == ["asset"])
+        let transactions = try repository.transactions().filter { $0.operation == .archive }
+        #expect(transactions.count == 2)
+        #expect(transactions.allSatisfy { $0.archiveDecision == nil })
+        #expect(try repository.settings().recentAlbumIDs == ["second", "first"])
+        #expect(archiveCount == 0)
+        #expect(selectionCount == 1)
+        #expect(flow.selectedAlbumIDs.isEmpty)
+
+        let reopened = AlbumSelectionFlow(
+            assetID: "asset", taskID: task.id, estimatedBytes: 10_000,
+            repository: repository, mutator: mutator
+        )
+        await reopened.loadAlbums()
+        reopened.selectAlbumForAddition(id: "first")
+        #expect(reopened.existingAlbumIDs == ["first", "second"])
+        #expect(!reopened.canSubmitSelection)
+    }
+
+    // Production break: retry resubmits successful targets or loses the failed selection.
+    @Test("Partial addition preserves failed selections and retries only those targets")
+    func partialAdditionRetriesOnlyFailedTargets() async throws {
+        let repository = try SwiftDataTaskRepository(inMemory: true)
+        let mutator = ControlledAlbumMutator(failedAlbumID: "second")
+        var completions = 0
+        let flow = AlbumSelectionFlow(
+            assetID: "asset", taskID: nil, estimatedBytes: 0,
+            repository: repository, mutator: mutator,
+            onSelectionSucceeded: { completions += 1 }
+        )
+        await flow.loadAlbums()
+        flow.selectAlbumForAddition(id: "first")
+        flow.selectAlbumForAddition(id: "second")
+        await flow.submitSelectedAlbums()
+        #expect(flow.existingAlbumIDs == ["first"])
+        #expect(flow.selectedAlbumIDs == ["second"])
+        #expect(flow.canSubmitSelection)
+        #expect(flow.errorGuidance != nil)
+        #expect(completions == 0)
+        await mutator.allowAllAdditions()
+        await flow.submitSelectedAlbums()
+        #expect(await mutator.addedAlbumIDs == ["first", "second", "second"])
+        #expect(flow.existingAlbumIDs == ["first", "second"])
+        #expect(try repository.decisions().isEmpty)
+        #expect(completions == 1)
+    }
+
+    // Production break: a disappeared selected row leaves an invisible target selected or reports success.
+    @Test("Missing inline target is removed and can be corrected without premature completion")
+    func missingInlineTargetCanBeCorrected() async throws {
+        let repository = try SwiftDataTaskRepository(inMemory: true)
+        let mutator = SimulatedPhotoLibraryMutator(
+            assetIDs: ["asset"],
+            albums: [album(id: "missing", title: "A"), album(id: "valid", title: "B")],
+            albumIDsMissingOnArchive: ["missing"]
+        )
+        var completions = 0
+        let flow = AlbumSelectionFlow(
+            assetID: "asset", taskID: nil, estimatedBytes: 0,
+            repository: repository, mutator: mutator,
+            onSelectionSucceeded: { completions += 1 }
+        )
+        await flow.loadAlbums()
+        flow.selectAlbumForAddition(id: "missing")
+        await flow.submitSelectedAlbums()
+        #expect(flow.requiresReselection)
+        #expect(flow.errorGuidance != nil)
+        #expect(flow.selectedAlbumIDs.isEmpty)
+        #expect(!flow.canSubmitSelection)
+        #expect(completions == 0)
+        flow.selectAlbumForAddition(id: "valid")
+        await flow.submitSelectedAlbums()
+        #expect(await mutator.archivedAssetIDs(for: ["asset"], inAlbumID: "valid") == ["asset"])
+        #expect(try repository.decisions().isEmpty)
+        #expect(completions == 1)
+    }
+
+    // Production break: actor reentrancy creates duplicate albums or allows addition while creation is pending.
+    @Test("Suspended creation is single-flight and does not submit or complete the panel")
+    func albumCreationIsSingleFlight() async throws {
+        let repository = try SwiftDataTaskRepository(inMemory: true)
+        let mutator = ControlledAlbumMutator(suspendCreation: true)
+        var completions = 0
+        let flow = AlbumSelectionFlow(
+            assetID: "asset", taskID: nil, estimatedBytes: 0,
+            repository: repository, mutator: mutator,
+            onSelectionSucceeded: { completions += 1 }
+        )
+        await flow.loadAlbums()
+        flow.selectAlbumForAddition(id: "first")
+        let first = Task { await flow.createAlbum(named: "旅行") }
+        await mutator.waitForCreation()
+        #expect(flow.isCreatingAlbum)
+        #expect(!flow.canSubmitSelection)
+        #expect(await flow.createAlbum(named: "旅行") == nil)
+        flow.toggleAlbumSelection(id: "first")
+        flow.selectAlbumForAddition(id: "second")
+        await flow.submitSelectedAlbums()
+        await flow.selectAlbum(id: "first")
+        await flow.createAndArchive(named: "其他")
+        #expect(flow.selectedAlbumIDs == ["first"])
+        #expect(completions == 0)
+        #expect(await mutator.addedAlbumIDs.isEmpty)
+        await mutator.finishCreation()
+        let created = try #require(await first.value)
+        #expect(!flow.isCreatingAlbum)
+        flow.selectAlbumForAddition(id: created)
+        flow.selectAlbumForAddition(id: created)
+        #expect(flow.selectedAlbumIDs == ["first", created])
+        #expect(await mutator.creationCount == 1)
+        #expect(try repository.decisions().isEmpty)
+        #expect(completions == 0)
+    }
+
+    // Production break: duplicate taps submit twice or dismiss the panel before PhotoKit confirms success.
+    @Test("Suspended addition blocks duplicate submission and delays completion")
+    func suspendedAdditionDelaysCompletion() async throws {
+        let repository = try SwiftDataTaskRepository(inMemory: true)
+        let mutator = ControlledAlbumMutator(suspendAddition: true)
+        var completions = 0
+        let flow = AlbumSelectionFlow(
+            assetID: "asset", taskID: nil, estimatedBytes: 0,
+            repository: repository, mutator: mutator,
+            onSelectionSucceeded: { completions += 1 }
+        )
+        await flow.loadAlbums()
+        flow.selectAlbumForAddition(id: "first")
+        let submission = Task { await flow.submitSelectedAlbums() }
+        await mutator.waitForAddition()
+        #expect(flow.isArchiving)
+        #expect(completions == 0)
+        await flow.submitSelectedAlbums()
+        #expect(await flow.createAlbum(named: "旅行") == nil)
+        flow.toggleAlbumSelection(id: "first")
+        #expect(flow.selectedAlbumIDs == ["first"])
+        await mutator.finishAddition()
+        await submission.value
+        #expect(await mutator.addedAlbumIDs == ["first"])
+        #expect(completions == 1)
+        #expect(try repository.decisions().isEmpty)
+    }
+
     // Production break: a valid new-album name is archived with surrounding whitespace or the created target is not made recent.
     @Test("New-album creation trims the name, archives into it, and makes it recent")
     func createsTrimmedAlbumAndArchives() async throws {
@@ -222,9 +396,9 @@ struct AlbumArchiveFlowTests {
         }
     }
 
-    // Production break: AppModel archives a different route asset or returns without advancing the originating decision flow.
-    @Test("AppModel returns the exact archive route to the originating task's next asset")
-    func appModelReturnsToNextAssetAfterArchive() async throws {
+    // Inline album addition deliberately leaves the decision cursor unchanged.
+    @Test("AppModel keeps the current asset after inline album addition")
+    func appModelKeepsCurrentAssetAfterInlineAddition() async throws {
         let repository = try SwiftDataTaskRepository(inMemory: true)
         let task = makeTask(assetIDs: ["asset", "next"])
         try repository.save(task: task)
@@ -243,15 +417,17 @@ struct AlbumArchiveFlowTests {
         let decisionFlow = try #require(model.singleDecisionFlow(for: task.id))
 
         decisionFlow.requestArchive()
-        #expect(model.taskNavigationPath == [.task(task.id), .albumSelection("asset")])
+        #expect(model.taskNavigationPath == [.task(task.id)])
+        #expect(model.inlineAlbumAssetID == "asset")
         await model.prepareAlbumSelection(assetID: "asset")
         let albumFlow = try #require(model.albumSelectionFlow(for: "asset"))
-        await albumFlow.selectAlbum(id: "target")
+        albumFlow.selectAlbumForAddition(id: "target")
+        await albumFlow.submitSelectedAlbums()
 
         #expect(model.taskNavigationPath == [.task(task.id)])
-        #expect(decisionFlow.currentDescriptor?.id == "next")
-        #expect(try repository.tasks().first?.currentAssetIndex == 1)
-        #expect(try repository.decisions().count == 1)
+        #expect(decisionFlow.currentDescriptor?.id == "asset")
+        #expect(try repository.tasks().first?.currentAssetIndex == 0)
+        #expect(try repository.decisions().isEmpty)
     }
 
     // Production break: a cached album flow keeps submitting through the prior live backend after Debug opt-out.
@@ -357,6 +533,91 @@ struct AlbumArchiveFlowTests {
         #expect(flow.errorGuidance == "无法创建相册，请稍后重试。")
         #expect(!flow.requiresReselection)
         #expect(await mutator.submittedAssetIDs.isEmpty)
+    }
+
+    @Test("Inline membership settings failure retains a recoverable selection without repeating Photos mutation")
+    func inlineSettingsFailureRetriesLocalFinalization() async throws {
+        let storage = try SwiftDataTaskRepository(inMemory: true)
+        let repository = SettingsSaveFailingRepository(storage: storage)
+        let mutator = ControlledAlbumMutator()
+        var completed = 0
+        let flow = AlbumSelectionFlow(assetID: "asset", taskID: nil, estimatedBytes: 0,
+            repository: repository, mutator: mutator, onSelectionSucceeded: { completed += 1 })
+        await flow.loadAlbums()
+        flow.selectAlbumForAddition(id: "first")
+        await flow.submitSelectedAlbums()
+        #expect(flow.errorGuidance != nil)
+        #expect(flow.selectedAlbumIDs == ["first"])
+        #expect(flow.canSubmitSelection)
+        #expect(completed == 0)
+        #expect(try storage.transactions().last?.items.first?.state == .submitted)
+        repository.shouldFailSettings = false
+        await flow.submitSelectedAlbums()
+        #expect(completed == 1)
+        #expect(flow.selectedAlbumIDs.isEmpty)
+        #expect(try storage.settings().recentAlbumIDs == ["first"])
+        #expect(try storage.decisions().isEmpty)
+        #expect(await mutator.addedAlbumIDs == ["first"])
+    }
+
+    @Test("Terminal membership journal failure retries without another Photos submission")
+    func inlineTerminalJournalFailureRetriesWithoutAdding() async throws {
+        let storage = try SwiftDataTaskRepository(inMemory: true)
+        let repository = SettingsSaveFailingRepository(storage: storage)
+        repository.shouldFailSettings = false
+        repository.shouldFailTerminalArchive = true
+        let mutator = ControlledAlbumMutator()
+        let flow = AlbumSelectionFlow(assetID: "asset", taskID: nil, estimatedBytes: 0,
+            repository: repository, mutator: mutator)
+        await flow.loadAlbums()
+        flow.selectAlbumForAddition(id: "first")
+        await flow.submitSelectedAlbums()
+        #expect(flow.canSubmitSelection)
+        #expect(flow.errorGuidance != nil)
+        #expect(try storage.transactions().last?.items.first?.state == .submitted)
+        repository.shouldFailTerminalArchive = false
+        await flow.submitSelectedAlbums()
+        #expect(flow.selectedAlbumIDs.isEmpty)
+        #expect(try storage.transactions().last?.items.first?.state == .succeeded)
+        #expect(try storage.settings().recentAlbumIDs == ["first"])
+        #expect(await mutator.addedAlbumIDs == ["first"])
+    }
+
+    @Test("Inline opening replaces a cached routed album flow and closes after addition")
+    func inlinePanelReplacesLegacyCache() async throws {
+        let repository = try SwiftDataTaskRepository(inMemory: true)
+        let mutator = ControlledAlbumMutator()
+        let model = AppModel(library: AlbumArchiveReader(assetIDs: ["asset"]),
+            repository: repository, mutator: mutator, initialScan: .idle)
+        await model.prepareAlbumSelection(assetID: "asset")
+        let legacy = try #require(model.albumSelectionFlow)
+        model.openInlineAlbumPanel(assetID: "asset")
+        await model.prepareAlbumSelection(assetID: "asset")
+        let inline = try #require(model.albumSelectionFlow)
+        #expect(inline !== legacy)
+        inline.selectAlbumForAddition(id: "first")
+        await inline.submitSelectedAlbums()
+        #expect(model.inlineAlbumAssetID == nil)
+        #expect(model.albumSelectionFlow == nil)
+        #expect(try repository.decisions().isEmpty)
+    }
+
+    @Test("Restart reconciles membership-only settings without deciding or adding again")
+    func inlineRestartRecoversSettings() async throws {
+        let storage = try SwiftDataTaskRepository(inMemory: true)
+        let repository = SettingsSaveFailingRepository(storage: storage)
+        let mutator = ControlledAlbumMutator()
+        let coordinator = MutationCoordinator(repository: repository, mutator: mutator)
+        do {
+            _ = try await coordinator.submitArchiveTarget(assetID: "asset", targetAlbumID: "first", recentAlbumIDs: ["first"])
+            Issue.record("Expected local settings finalization to fail")
+        } catch {}
+        let restarted = MutationCoordinator(repository: storage, mutator: mutator)
+        try await restarted.reconcileInterruptedTransactions()
+        #expect(try storage.settings().recentAlbumIDs == ["first"])
+        #expect(try storage.transactions().last?.items.first?.state == .succeeded)
+        #expect(try storage.decisions().isEmpty)
+        #expect(await mutator.addedAlbumIDs == ["first"])
     }
 
     private func album(id: String, title: String) -> PhotoAlbumDescriptor {
@@ -478,6 +739,8 @@ private actor AlbumArchiveReader: PhotoLibraryReading {
 @MainActor
 private final class SettingsSaveFailingRepository: TaskRepository {
     private let storage: SwiftDataTaskRepository
+    var shouldFailSettings = true
+    var shouldFailTerminalArchive = false
 
     init(storage: SwiftDataTaskRepository) {
         self.storage = storage
@@ -516,9 +779,17 @@ private final class SettingsSaveFailingRepository: TaskRepository {
     func save(undo: DecisionUndoEntry) throws { try storage.save(undo: undo) }
     func latestUndo() throws -> DecisionUndoEntry? { try storage.latestUndo() }
     func removeUndo(id: UUID) throws { try storage.removeUndo(id: id) }
-    func save(transaction: MutationTransaction) throws { try storage.save(transaction: transaction) }
+    func save(transaction: MutationTransaction) throws {
+        if shouldFailTerminalArchive && transaction.operation == .archive && transaction.items.contains(where: { $0.state == .succeeded }) {
+            throw SettingsSaveFailure.forced
+        }
+        try storage.save(transaction: transaction)
+    }
     func transactions() throws -> [MutationTransaction] { try storage.transactions() }
-    func save(settings: WorkflowSettings) throws { throw SettingsSaveFailure.forced }
+    func save(settings: WorkflowSettings) throws {
+        if shouldFailSettings { throw SettingsSaveFailure.forced }
+        try storage.save(settings: settings)
+    }
     func settings() throws -> WorkflowSettings { try storage.settings() }
     func save(summary: CleanupSummary) throws { try storage.save(summary: summary) }
     func summaries() throws -> [CleanupSummary] { try storage.summaries() }
@@ -530,4 +801,70 @@ private final class SettingsSaveFailingRepository: TaskRepository {
 
 private enum SettingsSaveFailure: Error {
     case forced
+}
+
+private actor ControlledAlbumMutator: PhotoLibraryMutating {
+    let backendMode = MutationBackendMode.simulated
+    private var albums = [
+        PhotoAlbumDescriptor(id: "first", title: "A", assetCount: 0),
+        PhotoAlbumDescriptor(id: "second", title: "B", assetCount: 0)
+    ]
+    private var memberships: [String: Set<String>] = [:]
+    private var failedAlbumID: String?
+    private let suspendCreation: Bool
+    private let suspendAddition: Bool
+    private(set) var creationCount = 0
+    private(set) var addedAlbumIDs: [String] = []
+    private var creationWaiter: CheckedContinuation<Void, Never>?
+    private var creationFinisher: CheckedContinuation<Void, Never>?
+    private var additionWaiter: CheckedContinuation<Void, Never>?
+    private var additionFinisher: CheckedContinuation<Void, Never>?
+
+    init(failedAlbumID: String? = nil, suspendCreation: Bool = false, suspendAddition: Bool = false) {
+        self.failedAlbumID = failedAlbumID
+        self.suspendCreation = suspendCreation
+        self.suspendAddition = suspendAddition
+    }
+
+    func availableAssetIDs(for requestedIDs: [String]) -> Set<String> { Set(requestedIDs) }
+    func listAlbums() -> [PhotoAlbumDescriptor] { albums }
+    func archivedAssetIDs(for requestedIDs: [String], inAlbumID albumID: String) -> Set<String> {
+        (memberships[albumID] ?? []).intersection(requestedIDs)
+    }
+    func createAlbum(named title: String) async -> PhotoAlbumDescriptor? {
+        creationCount += 1
+        creationWaiter?.resume()
+        creationWaiter = nil
+        if suspendCreation { await withCheckedContinuation { creationFinisher = $0 } }
+        let album = PhotoAlbumDescriptor(id: "created", title: title, assetCount: 0)
+        albums.append(album)
+        return album
+    }
+    func addAssets(withIDs assetIDs: [String], toAlbumID albumID: String) async -> PhotoMutationBatch {
+        addedAlbumIDs.append(albumID)
+        additionWaiter?.resume()
+        additionWaiter = nil
+        if suspendAddition { await withCheckedContinuation { additionFinisher = $0 } }
+        let state: MutationItemState = albumID == failedAlbumID ? .failed : .succeeded
+        if state == .succeeded { memberships[albumID, default: []].formUnion(assetIDs) }
+        return PhotoMutationBatch(
+            operation: .archive,
+            items: assetIDs.map { MutationItem(assetID: $0, state: state) },
+            targetAlbumID: albumID
+        )
+    }
+    func deleteAssets(withIDs assetIDs: [String]) -> PhotoMutationBatch {
+        PhotoMutationBatch(operation: .delete, items: [], targetAlbumID: nil)
+    }
+    func allowAllAdditions() { failedAlbumID = nil }
+    func waitForCreation() async {
+        guard creationCount == 0 else { return }
+        await withCheckedContinuation { creationWaiter = $0 }
+    }
+    func finishCreation() { creationFinisher?.resume(); creationFinisher = nil }
+    func waitForAddition() async {
+        guard addedAlbumIDs.isEmpty else { return }
+        await withCheckedContinuation { additionWaiter = $0 }
+    }
+    func finishAddition() { additionFinisher?.resume(); additionFinisher = nil }
 }

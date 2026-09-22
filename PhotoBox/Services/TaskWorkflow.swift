@@ -176,34 +176,65 @@ final class DecisionWorkflow: ComparisonGroupDecisionApplying {
         )
         if var task {
             if task.type == .dateBatch {
-                guard task.ownedAssetIDs.contains(decision.assetID),
-                      task.assetIDs.contains(decision.assetID) else {
+                let isOwnPendingDecision = previousDecision?.taskID == task.id
+                    && previousDecision?.isSubmitted == false
+                guard task.assetIDs.contains(decision.assetID),
+                      previousDecision?.isSubmitted != true,
+                      previousDecision == nil || isOwnPendingDecision,
+                      task.ownedAssetIDs.contains(decision.assetID) || isOwnPendingDecision else {
                     throw DecisionFlowError.noCurrentAsset
                 }
-            } else {
-                task.currentAssetIndex = min(task.currentAssetIndex + 1, task.assetIDs.count)
             }
             task.ownedAssetIDs.removeAll { $0 == decision.assetID }
-            let dateBatchDone: Bool
-            if task.type == .dateBatch {
-                let remainingIDs = Set(task.ownedAssetIDs)
-                task.currentAssetIndex = task.assetIDs.firstIndex(where: { remainingIDs.contains($0) })
-                    ?? task.assetIDs.count
-                let decided = Set(try repository.decisions().map(\.assetID)).union([decision.assetID])
-                dateBatchDone = task.assetIDs.allSatisfy { decided.contains($0) }
-                if !dateBatchDone && task.ownedAssetIDs.isEmpty { task.status = .paused }
-            } else {
-                dateBatchDone = false
-            }
-            if dateBatchDone || (task.type != .dateBatch && task.currentAssetIndex == task.assetIDs.count) {
+            let decided = Set(try repository.decisions().map(\.assetID)).union([decision.assetID])
+            let taskIsComplete = task.assetIDs.allSatisfy { decided.contains($0) }
+            let decisionIndex = task.assetIDs.firstIndex(of: decision.assetID) ?? task.currentAssetIndex
+            if taskIsComplete {
+                // Keep a valid cursor so a completed task can still revisit its last photo.
+                task.currentAssetIndex = min(max(decisionIndex, 0), max(task.assetIDs.count - 1, 0))
                 task.status = .completed
                 task.ownedAssetIDs = []
+            } else if task.type == .dateBatch {
+                let eligibleIDs = Set(task.ownedAssetIDs)
+                task.currentAssetIndex = nextUndecidedIndex(
+                    after: decisionIndex,
+                    assetIDs: task.assetIDs,
+                    eligibleIDs: eligibleIDs,
+                    decidedIDs: decided
+                ) ?? decisionIndex
+                if task.ownedAssetIDs.isEmpty { task.status = .paused }
+            } else {
+                task.currentAssetIndex = nextUndecidedIndex(
+                    after: decisionIndex,
+                    assetIDs: task.assetIDs,
+                    eligibleIDs: nil,
+                    decidedIDs: decided
+                ) ?? decisionIndex
+                task.status = .inProgress
             }
             task.updatedAt = decision.createdAt
             try repository.applySingleDecision(decision, undo: undo, task: task)
         } else {
             try repository.applySingleDecision(decision, undo: undo, task: nil)
         }
+    }
+
+    private func nextUndecidedIndex(
+        after index: Int,
+        assetIDs: [String],
+        eligibleIDs: Set<String>?,
+        decidedIDs: Set<String>
+    ) -> Int? {
+        guard !assetIDs.isEmpty else { return nil }
+        for offset in 1...assetIDs.count {
+            let candidate = (index + offset) % assetIDs.count
+            let assetID = assetIDs[candidate]
+            if (eligibleIDs == nil || eligibleIDs?.contains(assetID) == true),
+               !decidedIDs.contains(assetID) {
+                return candidate
+            }
+        }
+        return nil
     }
 
     func applyGroup(_ decisions: [PhotoDecision]) throws {

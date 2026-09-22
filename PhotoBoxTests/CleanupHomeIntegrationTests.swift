@@ -65,6 +65,29 @@ struct CleanupHomeIntegrationTests {
         #expect(restored.homeProjection.months.first?.processedCount == 1)
     }
 
+    @Test("Filmstrip choice survives AppModel restart including a pending decision")
+    func filmstripCursorSurvivesModelRestart() async throws {
+        let repository = try SwiftDataTaskRepository(inMemory: true)
+        let descriptors = [photo("a"), photo("b"), photo("c")]
+        let model = makeModel(repository: repository, descriptors: descriptors)
+        model.startHomeCollection(.recent)
+        let task = try #require(model.cleanupTasks.first { $0.type == .dateBatch })
+        await model.prepareSingleDecision(taskID: task.id)
+        let flow = try #require(model.decisionFlow)
+        try flow.decide(.deleteCandidate)
+        #expect(flow.select(index: 0))
+        #expect(try repository.tasks().first?.currentAssetIndex == 0)
+        let restarted = makeModel(repository: repository, descriptors: descriptors)
+        restarted.startHomeCollection(.recent)
+        await restarted.prepareSingleDecision(taskID: task.id)
+        #expect(restarted.decisionFlow?.currentDescriptor?.id == "a")
+        #expect(restarted.decisionFlow?.pendingDecisionCount == 1)
+        try #require(restarted.decisionFlow).decide(.keep)
+        #expect(restarted.decisionFlow?.pendingDecisionCount == 1)
+        #expect(try repository.decision(for: "a")?.kind == .keep)
+        #expect(restarted.decisionFlow?.currentDescriptor?.id == "b")
+    }
+
     @Test("A date batch finishing with candidates reaches existing review")
     func completedBatchOpensReview() async throws {
         let repository = try SwiftDataTaskRepository(inMemory: true)
@@ -75,6 +98,32 @@ struct CleanupHomeIntegrationTests {
         try #require(model.decisionFlow).decide(.deleteCandidate)
         #expect(model.taskNavigationPath.last == .deleteReview)
         #expect(try repository.transactions().isEmpty)
+    }
+
+    @Test("Unavailable remainder pauses a batch before deletion review and resumes later")
+    func unavailableRemainderDoesNotOpenReview() async throws {
+        let repository = try SwiftDataTaskRepository(inMemory: true)
+        let first = makeModel(repository: repository, descriptors: [photo("a"), photo("b")])
+        first.startHomeCollection(.recent)
+        let task = try #require(first.cleanupTasks.first { $0.type == .dateBatch })
+        let restored = makeModel(repository: repository, descriptors: [photo("a"), photo("b", availability: .iCloudOnly)])
+        restored.startHomeCollection(.recent)
+        await restored.prepareSingleDecision(taskID: task.id)
+        try #require(restored.decisionFlow).decide(.deleteCandidate)
+        #expect(restored.taskNavigationPath.isEmpty)
+        #expect(restored.homeNotice != nil)
+        #expect(try repository.tasks().first?.status == .paused)
+        #expect(try repository.decision(for: "a")?.kind == .deleteCandidate)
+        #expect(try repository.decision(for: "b") == nil)
+        #expect(try repository.transactions().isEmpty)
+
+        let resumed = makeModel(repository: repository, descriptors: [photo("a"), photo("b")])
+        resumed.startHomeCollection(.recent)
+        await resumed.prepareSingleDecision(taskID: task.id)
+        let flow = try #require(resumed.decisionFlow)
+        #expect(flow.select(index: 1))
+        try flow.decide(.keep)
+        #expect(resumed.taskNavigationPath.last == .deleteReview)
     }
 
     @Test("Cloud-only home entries show counts without creating work")

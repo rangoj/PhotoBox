@@ -65,6 +65,24 @@ nonisolated struct PhotoAlbumDescriptor: Codable, Equatable, Identifiable, Senda
     let id: String
     let title: String
     let assetCount: Int
+    let coverAssetID: String?
+
+    init(id: String, title: String, assetCount: Int, coverAssetID: String? = nil) {
+        self.id = id
+        self.title = title
+        self.assetCount = assetCount
+        self.coverAssetID = coverAssetID
+    }
+
+    enum CodingKeys: String, CodingKey { case id, title, assetCount, coverAssetID }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        title = try values.decode(String.self, forKey: .title)
+        assetCount = try values.decode(Int.self, forKey: .assetCount)
+        coverAssetID = try values.decodeIfPresent(String.self, forKey: .coverAssetID)
+    }
 }
 
 nonisolated struct PhotoMutationBatch: Equatable, Sendable {
@@ -84,11 +102,15 @@ nonisolated protocol PhotoLibraryMutating: Sendable {
     func deleteAssets(withIDs assetIDs: [String]) async -> PhotoMutationBatch
 }
 
+nonisolated protocol PhotoFavoriteMutating: Sendable {
+    func setFavorite(_ isFavorite: Bool, forAssetID assetID: String) async -> Bool
+}
+
 extension PhotoLibraryMutating {
     var reconciliationMode: MutationReconciliationMode { .conservative }
 }
 
-actor SimulatedPhotoLibraryMutator: PhotoLibraryMutating {
+actor SimulatedPhotoLibraryMutator: PhotoLibraryMutating, PhotoFavoriteMutating {
     let backendMode = MutationBackendMode.simulated
     let reconciliationMode: MutationReconciliationMode
     private var assetIDs: Set<String>
@@ -99,6 +121,7 @@ actor SimulatedPhotoLibraryMutator: PhotoLibraryMutating {
     private(set) var submittedAssetIDs: [String] = []
     private(set) var createAlbumRequests: [String] = []
     private var mutationCallCount = 0
+    private var favoriteAssetIDs: Set<String> = []
 
     init(
         assetIDs: Set<String> = [],
@@ -175,6 +198,12 @@ actor SimulatedPhotoLibraryMutator: PhotoLibraryMutating {
         let items = outcomes(for: requestedIDs)
         assetIDs.subtract(items.filter { $0.state == .succeeded }.map(\.assetID))
         return PhotoMutationBatch(operation: .delete, items: items, targetAlbumID: nil)
+    }
+
+    func setFavorite(_ isFavorite: Bool, forAssetID assetID: String) -> Bool {
+        guard assetIDs.contains(assetID) else { return false }
+        if isFavorite { favoriteAssetIDs.insert(assetID) } else { favoriteAssetIDs.remove(assetID) }
+        return true
     }
 
     func inventoryFingerprint() -> String {
@@ -269,6 +298,43 @@ final class MutationCoordinator {
             )],
             targetAlbumID: albumID,
             archiveDecision: decision,
+            recentAlbumIDs: recentAlbumIDs,
+            backendMode: backendMode
+        )
+        try repository.save(transaction: transaction)
+        return try await executePendingItems(in: &transaction)
+    }
+
+    /// Adds album membership without completing a decision or advancing its
+    /// task. The submitted journal remains recoverable until settings are saved.
+    func submitArchiveTarget(
+        assetID: String,
+        targetAlbumID: String,
+        recentAlbumIDs: [String]
+    ) async throws -> MutationTransaction {
+        let interruptedArchives = try repository.transactions().filter {
+            $0.operation == .archive
+                && $0.targetAlbumID == targetAlbumID
+                && $0.archiveDecision == nil
+                && $0.items.contains(where: {
+                    $0.assetID == assetID && $0.state == .submitted
+                })
+        }
+        if var interrupted = interruptedArchives.last {
+            try validateBackend(interrupted, actual: await mutator.backendMode)
+            return try await reconcileArchive(in: &interrupted)
+        }
+
+        let backendMode = await mutator.backendMode
+        let availableIDs = await mutator.availableAssetIDs(for: [assetID])
+        var transaction = MutationTransaction(
+            id: UUID().uuidString,
+            operation: .archive,
+            items: [MutationItem(
+                assetID: assetID,
+                state: availableIDs.contains(assetID) ? .pending : .stale
+            )],
+            targetAlbumID: targetAlbumID,
             recentAlbumIDs: recentAlbumIDs,
             backendMode: backendMode
         )
@@ -494,6 +560,7 @@ final class MutationCoordinator {
                 recentAlbumIDs: transaction.recentAlbumIDs ?? []
             )
         } else {
+            try finalizeMembershipSettings(for: transaction)
             try repository.save(transaction: transaction)
             if transaction.operation == .delete {
                 try markSuccessfulDecisionsSubmitted(transaction.items)
@@ -531,9 +598,22 @@ final class MutationCoordinator {
                 recentAlbumIDs: transaction.recentAlbumIDs ?? []
             )
         } else {
+            try finalizeMembershipSettings(for: transaction)
             try repository.save(transaction: transaction)
         }
         return transaction
+    }
+
+    private func finalizeMembershipSettings(for transaction: MutationTransaction) throws {
+        guard transaction.operation == .archive,
+              transaction.archiveDecision == nil,
+              let recentAlbumIDs = transaction.recentAlbumIDs,
+              transaction.items.contains(where: { $0.state == .succeeded }) else { return }
+        // Save settings before the terminal journal state. If either save fails,
+        // recovery checks membership and repeats only this local finalization.
+        var settings = try repository.settings()
+        settings.recentAlbumIDs = recentAlbumIDs
+        try repository.save(settings: settings)
     }
 
     private func reconcileSubmittedDelete(in transaction: inout MutationTransaction) async throws {

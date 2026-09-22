@@ -44,7 +44,7 @@ final class CleanupHomeUITests: XCTestCase {
         let app = launchHome()
         element("home-recent", in: app).tap()
         assertDecisionScreen(in: app)
-        XCTAssertEqual(value(of: element("decision-position", in: app)), "第 1 项，共 40 项")
+        XCTAssertEqual(value(of: element("decision-b01-position", in: app)), "第 1 项，共 40 项")
     }
 
     func testRandomEntryOpensAnEligibleDayBatch() throws {
@@ -67,7 +67,7 @@ final class CleanupHomeUITests: XCTestCase {
         let app = launchHome()
         element("home-month-2026-08", in: app).tap()
         assertDecisionScreen(in: app)
-        XCTAssertEqual(value(of: element("decision-position", in: app)), "第 1 项，共 40 项")
+        XCTAssertEqual(value(of: element("decision-b01-position", in: app)), "第 1 项，共 40 项")
     }
 
     func testThreeTabsAndMyDirectDestinations() throws {
@@ -98,9 +98,9 @@ final class CleanupHomeUITests: XCTestCase {
         element("home-recent", in: app).tap()
         assertDecisionScreen(in: app)
 
-        element("decision-keep", in: app).tap()
-        XCTAssertTrue(waitForValue("第 2 项，共 2 项", element: element("decision-position", in: app)))
-        element("decision-keep", in: app).tap()
+        swipePhoto(.right, in: app)
+        XCTAssertTrue(waitForValue("第 2 项，共 2 项", element: element("decision-b01-position", in: app)))
+        swipePhoto(.right, in: app)
 
         let returnButton = element("cleanup-results-return", in: app)
         XCTAssertTrue(returnButton.waitForExistence(timeout: 5))
@@ -114,9 +114,9 @@ final class CleanupHomeUITests: XCTestCase {
         element("home-recent", in: app).tap()
         assertDecisionScreen(in: app)
 
-        element("decision-delete", in: app).tap()
-        XCTAssertTrue(waitForValue("第 2 项，共 2 项", element: element("decision-position", in: app)))
-        element("decision-keep", in: app).tap()
+        swipePhoto(.left, in: app)
+        XCTAssertTrue(waitForValue("第 2 项，共 2 项", element: element("decision-b01-position", in: app)))
+        swipePhoto(.right, in: app)
 
         XCTAssertTrue(app.navigationBars["删除复核"].waitForExistence(timeout: 5))
         let count = element("delete-review-candidate-count", in: app)
@@ -181,9 +181,20 @@ final class CleanupHomeUITests: XCTestCase {
     }
 
     private func assertDecisionScreen(in app: XCUIApplication) {
-        XCTAssertTrue(element("decision-position", in: app).waitForExistence(timeout: 5))
-        XCTAssertTrue(element("decision-media-viewport", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(element("decision-b01-position", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(element("decision-b01-photo", in: app).waitForExistence(timeout: 5))
         XCTAssertFalse(app.tabBars.buttons["整理"].exists)
+    }
+
+    private enum PhotoSwipe { case left, right }
+
+    private func swipePhoto(_ direction: PhotoSwipe, in app: XCUIApplication) {
+        let photo = element("decision-b01-photo", in: app)
+        XCTAssertTrue(photo.waitForExistence(timeout: 5))
+        switch direction {
+        case .left: photo.swipeLeft()
+        case .right: photo.swipeRight()
+        }
     }
 
     private func element(_ identifier: String, in app: XCUIApplication) -> XCUIElement {

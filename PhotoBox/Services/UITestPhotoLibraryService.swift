@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import UIKit
 
 actor UITestPhotoLibraryService: PhotoLibraryReading {
     enum Fixture: Sendable, Equatable {
@@ -71,6 +72,16 @@ actor UITestPhotoLibraryService: PhotoLibraryReading {
             try? await Task.sleep(for: .seconds(5))
         }
         guard assetID != "media-unavailable" else { return nil }
+        if fixture == .decision || fixture == .archive {
+            let names = ["HomeFixtureLake", "HomeFixtureField", "HomeFixtureSunset", "HomeFixtureCoffee"]
+            let index = assetID.unicodeScalars.reduce(0) { $0 + Int($1.value) } % names.count
+            return await MainActor.run {
+                guard let image = UIImage(named: names[index]),
+                      let data = image.jpegData(compressionQuality: 0.9) else { return nil }
+                return PhotoThumbnail(assetID: assetID, data: data,
+                                      pixelWidth: Int(image.size.width), pixelHeight: Int(image.size.height))
+            }
+        }
         return PhotoThumbnail(
             assetID: assetID,
             data: Data(assetID.utf8),

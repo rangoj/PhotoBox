@@ -83,6 +83,7 @@ final class AppModel {
     var decisionLoadError: String?
     var albumSelectionFlow: AlbumSelectionFlow?
     var albumSelectionLoadError: String?
+    var inlineAlbumAssetID: String?
     var deleteReviewFlow: DeleteReviewModel?
     var deleteReviewLoadError: String?
     var isPreparingDeleteReview = false
@@ -373,6 +374,7 @@ final class AppModel {
         decisionLoadError = nil
         albumSelectionFlow = nil
         albumSelectionLoadError = nil
+        inlineAlbumAssetID = nil
         deleteReviewFlow = nil
         deleteReviewLoadError = nil
         isPreparingDeleteReview = false
@@ -1099,16 +1101,19 @@ final class AppModel {
                 let decidedIDs = Set(try repository.decisions().map(\.assetID))
                 let localIDs = Set(descriptors.filter { $0.availability == .local }.map(\.id))
                 let available = Set(task.ownedAssetIDs).intersection(localIDs).subtracting(decidedIDs)
-                guard let nextIndex = task.assetIDs.firstIndex(where: { available.contains($0) }) else {
+                let revisitIDs = Set(decisions.filter { !$0.isSubmitted }.map(\.assetID)).intersection(localIDs)
+                guard let nextIndex = task.assetIDs.firstIndex(where: { available.union(revisitIDs).contains($0) }) else {
                     _ = try TaskLifecycleController(repository: repository).pause(taskID: taskID)
                     decisionLoadError = "本批暂无可整理的本地照片，进度已保存。"
                     refreshCleanupTasks()
                     return
                 }
                 task.ownedAssetIDs = task.assetIDs.filter { available.contains($0) }
-                task.currentAssetIndex = nextIndex
+                if !available.union(revisitIDs).contains(task.assetIDs[min(task.currentAssetIndex, task.assetIDs.count - 1)]) {
+                    task.currentAssetIndex = nextIndex
+                }
                 try repository.save(task: task)
-                eligibleIDs = available
+                eligibleIDs = available.union(revisitIDs)
             }
             let hasReversibleUndo: Bool
             if let undo = try repository.latestUndo(), undo.taskID == taskID {
@@ -1125,6 +1130,7 @@ final class AppModel {
                 hasReversibleUndo: hasReversibleUndo,
                 eligibleAssetIDs: eligibleIDs,
                 undoAssetID: try repository.latestUndo()?.assetID,
+                undoPreviousDecision: try repository.latestUndo().flatMap { $0.taskID == taskID ? $0.previousDecision : nil },
                 onDecisionsChanged: { [weak self] in
                     self?.refreshPendingDecisions()
                     self?.refreshCleanupTasks()
@@ -1132,7 +1138,25 @@ final class AppModel {
                     self?.finishDateBatchSessionIfNeeded(taskID: taskID)
                 },
                 onArchiveRequested: { [weak self] assetID in
-                    self?.taskNavigationPath.append(.albumSelection(assetID))
+                    self?.openInlineAlbumPanel(assetID: assetID)
+                },
+                onArchivePreviewRequested: { [weak self] assetID in
+                    self?.prepareInlineAlbumPanel(assetID: assetID)
+                },
+                onFavoriteRequested: { [weak self] assetID, isFavorite in
+                    guard let self, let originatingFlow = self.decisionFlow else { return }
+                    Task { @MainActor in
+                        let succeeded = await (self.mutator as? any PhotoFavoriteMutating)?.setFavorite(isFavorite, forAssetID: assetID) ?? false
+                        originatingFlow.recordFavoriteResult(assetID: assetID, isFavorite: isFavorite, succeeded: succeeded)
+                    }
+                },
+                onSelectionChanged: { [weak self] index in
+                    guard let self, let repository = self.repository else { throw DecisionFlowError.persistenceFailed }
+                    guard var selectedTask = try repository.tasks().first(where: { $0.id == taskID }) else { throw DecisionFlowError.persistenceFailed }
+                    selectedTask.currentAssetIndex = index
+                    selectedTask.updatedAt = Date()
+                    try repository.save(task: selectedTask)
+                    self.refreshCleanupTasks()
                 }
             )
             refreshCleanupTasks()
@@ -1152,19 +1176,52 @@ final class AppModel {
 
         let descriptor = decisionFlow?.currentDescriptor
         let routedDescriptor = descriptor?.id == assetID ? descriptor : nil
-        let routedTaskID = routedDescriptor == nil ? nil : decisionTaskID
+        let isInline = inlineAlbumAssetID == assetID
+        let routedTaskID = isInline ? nil : (routedDescriptor == nil ? nil : decisionTaskID)
+        let legacyArchiveCompletion: ((PhotoDecision) -> Void)? = if !isInline && routedDescriptor != nil {
+            { [weak self] decision in self?.completeAlbumSelection(with: decision) }
+        } else {
+            nil
+        }
+        let inlineSelectionCompletion: (() -> Void)? = if isInline {
+            { [weak self] in
+                guard self?.inlineAlbumAssetID == assetID else { return }
+                self?.closeInlineAlbumPanel()
+            }
+        } else {
+            nil
+        }
         let flow = AlbumSelectionFlow(
             assetID: assetID,
             taskID: routedTaskID,
             estimatedBytes: routedDescriptor?.estimatedBytes ?? 0,
             repository: repository,
             mutator: mutator,
-            onArchiveSucceeded: { [weak self] decision in
-                self?.completeAlbumSelection(with: decision)
-            }
+            onArchiveSucceeded: legacyArchiveCompletion,
+            onSelectionSucceeded: inlineSelectionCompletion
         )
         albumSelectionFlow = flow
         await flow.loadAlbums()
+    }
+
+    func openInlineAlbumPanel(assetID: String) {
+        prepareInlineAlbumPanel(assetID: assetID)
+    }
+
+    private func prepareInlineAlbumPanel(assetID: String) {
+        if inlineAlbumAssetID != assetID { albumSelectionFlow = nil }
+        inlineAlbumAssetID = assetID
+        Task {
+            guard inlineAlbumAssetID == assetID else { return }
+            await prepareAlbumSelection(assetID: assetID)
+        }
+    }
+
+    func closeInlineAlbumPanel() {
+        guard albumSelectionFlow?.isArchiving != true,
+              albumSelectionFlow?.isCreatingAlbum != true else { return }
+        inlineAlbumAssetID = nil
+        albumSelectionFlow = nil
     }
 
     func prepareComparison(taskID: String) async {
@@ -1336,6 +1393,7 @@ final class AppModel {
     }
 
     private func completeAlbumSelection(with decision: PhotoDecision) {
+        inlineAlbumAssetID = nil
         if taskNavigationPath.last == .albumSelection(decision.assetID) {
             taskNavigationPath.removeLast()
         }
@@ -1349,19 +1407,23 @@ final class AppModel {
     }
 
     private func finishDateBatchSessionIfNeeded(taskID: String) {
-        guard let repository, decisionFlow?.isCompleted == true else { return }
+        guard let repository, decisionFlow?.isSessionExhausted == true else { return }
         do {
             guard let task = try repository.tasks().first(where: { $0.id == taskID }),
                   task.type == .dateBatch else { return }
+            guard task.status == .completed else {
+                _ = try TaskLifecycleController(repository: repository).pause(taskID: taskID)
+                refreshCleanupTasks()
+                taskNavigationPath = []
+                activeRoute = nil
+                homeNotice = "本批剩余照片暂不可用，进度已保存。"
+                return
+            }
             if try repository.decisions().contains(where: {
                 $0.taskID == taskID && $0.kind == .deleteCandidate && !$0.isSubmitted
             }) {
                 if taskNavigationPath.last != .deleteReview { taskNavigationPath.append(.deleteReview) }
                 activeRoute = .deleteReview
-            } else if task.status != .completed {
-                taskNavigationPath = []
-                activeRoute = nil
-                homeNotice = "本批剩余照片暂不可用，进度已保存。"
             }
         } catch {
             persistenceErrorMessage = error.localizedDescription
@@ -1776,10 +1838,13 @@ final class AppModel {
                var task = try repository?.tasks().first(where: { $0.id == taskID && $0.type == .dateBatch }) {
                 let localIDs = Set(libraryInventory.descriptors.filter { $0.availability == .local }.map(\.id))
                 task.ownedAssetIDs.removeAll { !localIDs.contains($0) }
-                let eligibleIDs = Set(task.ownedAssetIDs)
-                task.currentAssetIndex = task.assetIDs.firstIndex(where: { eligibleIDs.contains($0) })
-                    ?? task.assetIDs.count
-                if eligibleIDs.isEmpty && task.status == .inProgress { task.status = .paused }
+                let pendingIDs = Set(try repository?.decisions().filter { $0.taskID == taskID && !$0.isSubmitted }.map(\.assetID) ?? [])
+                let eligibleIDs = Set(task.ownedAssetIDs).union(pendingIDs).intersection(localIDs)
+                if !task.assetIDs.indices.contains(task.currentAssetIndex)
+                    || !eligibleIDs.contains(task.assetIDs[task.currentAssetIndex]) {
+                    task.currentAssetIndex = task.assetIDs.firstIndex(where: { eligibleIDs.contains($0) }) ?? task.assetIDs.count
+                }
+                if task.ownedAssetIDs.isEmpty && task.status == .inProgress { task.status = .paused }
                 try repository?.save(task: task)
                 decisionFlow?.updateEligibility(eligibleIDs)
                 finishDateBatchSessionIfNeeded(taskID: taskID)

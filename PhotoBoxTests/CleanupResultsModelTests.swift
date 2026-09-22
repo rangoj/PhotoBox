@@ -710,6 +710,10 @@ struct NoDeleteCleanupResultRoutingTests {
         )
         await model.prepareSingleDecision(taskID: task.id)
         model.singleDecisionFlow(for: task.id)?.requestArchive()
+        // Exercise the legacy routed album handoff, whose completion still
+        // records the archive decision and result summary.
+        model.taskNavigationPath = [.task(task.id), .albumSelection("archive")]
+        model.inlineAlbumAssetID = nil
         await model.prepareAlbumSelection(assetID: "archive")
 
         await model.albumSelectionFlow(for: "archive")?.selectAlbum(id: "target")

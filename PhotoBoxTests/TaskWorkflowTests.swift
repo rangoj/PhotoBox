@@ -154,6 +154,77 @@ struct TaskLifecycleTests {
 @Suite("Single decision and undo workflow")
 @MainActor
 struct DecisionWorkflowTests {
+    @Test("A date batch rejects an unowned first decision and another task's pending decision")
+    func dateBatchRejectsUnownedAsset() throws {
+        let repository = try SwiftDataTaskRepository(inMemory: true)
+        let task = CleanupTask.fixture(id: "task", assetIDs: ["asset"], type: .dateBatch)
+        try repository.save(task: task)
+        let workflow = DecisionWorkflow(repository: repository)
+        let replacement = PhotoDecision(assetID: "asset", kind: .keep, taskID: task.id)
+        #expect(throws: DecisionFlowError.noCurrentAsset) { try workflow.apply(replacement) }
+        let other = PhotoDecision(assetID: "asset", kind: .deleteCandidate, taskID: "other")
+        try repository.save(decision: other)
+        #expect(throws: DecisionFlowError.noCurrentAsset) { try workflow.apply(replacement) }
+        #expect(try repository.decision(for: "asset") == other)
+        #expect(try repository.latestUndo() == nil)
+    }
+
+    @Test("A date batch can replace its own pending decision but never a submitted decision")
+    func dateBatchRevisitsOnlyOwnPendingDecision() throws {
+        let repository = try SwiftDataTaskRepository(inMemory: true)
+        let task = CleanupTask.fixture(id: "task", assetIDs: ["asset", "next"], type: .dateBatch)
+        try repository.save(task: task)
+        let workflow = DecisionWorkflow(repository: repository)
+        try repository.save(decision: PhotoDecision(assetID: "asset", kind: .deleteCandidate, taskID: task.id))
+        try workflow.apply(PhotoDecision(assetID: "asset", kind: .keep, taskID: task.id))
+        #expect(try repository.decision(for: "asset")?.kind == .keep)
+        try workflow.markSubmitted(assetID: "asset")
+        #expect(throws: DecisionFlowError.noCurrentAsset) {
+            try workflow.apply(PhotoDecision(assetID: "asset", kind: .deleteCandidate, taskID: task.id))
+        }
+        #expect(try repository.decision(for: "asset")?.isSubmitted == true)
+    }
+
+    @Test("Non-date decisions advance to the next undecided asset with wraparound")
+    func nonDateDecisionAdvancesWithWraparound() throws {
+        let repository = try SwiftDataTaskRepository(inMemory: true)
+        var task = CleanupTask.fixture(id: "task", assetIDs: ["first", "second", "third"])
+        task.status = .inProgress
+        task.ownedAssetIDs = task.assetIDs
+        task.currentAssetIndex = 2
+        try repository.save(task: task)
+
+        try DecisionWorkflow(repository: repository).apply(
+            PhotoDecision(assetID: "third", kind: .keep, taskID: task.id)
+        )
+
+        let updated = try #require(repository.tasks().first)
+        #expect(updated.currentAssetIndex == 0)
+        #expect(updated.status == .inProgress)
+        #expect(updated.ownedAssetIDs == ["first", "second"])
+    }
+
+    @Test("Revisiting a pending non-date decision does not complete an undecided task")
+    func pendingDecisionDoesNotCompleteTask() throws {
+        let repository = try SwiftDataTaskRepository(inMemory: true)
+        var task = CleanupTask.fixture(id: "task", assetIDs: ["first", "second", "third"])
+        task.status = .inProgress
+        task.ownedAssetIDs = ["first", "second"]
+        task.currentAssetIndex = 2
+        try repository.save(task: task)
+        let workflow = DecisionWorkflow(repository: repository)
+        try workflow.apply(PhotoDecision(assetID: "third", kind: .keep, taskID: task.id))
+
+        let updated = try #require(repository.tasks().first)
+        #expect(updated.status == .inProgress)
+        #expect(updated.currentAssetIndex == 0)
+
+        try workflow.apply(PhotoDecision(assetID: "first", kind: .deleteCandidate, taskID: task.id))
+        let afterSecond = try #require(repository.tasks().first)
+        #expect(afterSecond.status == .inProgress)
+        #expect(afterSecond.currentAssetIndex == 1)
+    }
+
     @Test("A new decision replaces the prior state and updates aggregates")
     func decisionReplacement() throws {
         let repository = try SwiftDataTaskRepository(inMemory: true)

@@ -707,12 +707,17 @@ final class SwiftDataTaskRepository: TaskRepository {
     }
 
     func save(transaction: MutationTransaction) throws {
-        if let existing = try persistedTransaction(for: transaction.id) {
-            try existing.update(with: transaction)
-        } else {
-            context.insert(try PersistedMutationTransaction(transaction))
+        do {
+            if let existing = try persistedTransaction(for: transaction.id) {
+                try existing.update(with: transaction)
+            } else {
+                context.insert(try PersistedMutationTransaction(transaction))
+            }
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
         }
-        try context.save()
     }
 
     func transactions() throws -> [MutationTransaction] {

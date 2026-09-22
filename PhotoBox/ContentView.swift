@@ -484,6 +484,7 @@ private enum DecisionUITestFixture {
         return AppModel(
             library: UITestPhotoLibraryService(authorization: .authorized, fixture: .decision),
             repository: repository,
+            mutator: SimulatedPhotoLibraryMutator(assetIDs: Set(task.assetIDs)),
             initialScan: UITestPhotoLibraryService.snapshot(for: .decision),
             initialActiveRoute: .task(task.id)
         )
@@ -514,7 +515,8 @@ private enum ArchiveUITestFixture {
             assetIDs: Set(task.assetIDs),
             albums: [
                 PhotoAlbumDescriptor(id: "archive-missing", title: "会消失的相册", assetCount: 0),
-                PhotoAlbumDescriptor(id: "archive-valid", title: "旅行", assetCount: 0)
+                PhotoAlbumDescriptor(id: "archive-valid", title: "旅行", assetCount: 0),
+                PhotoAlbumDescriptor(id: "archive-second", title: "精选", assetCount: 0)
             ],
             albumIDsMissingOnArchive: ["archive-missing"],
             albumCreationFails: albumCreationFails
